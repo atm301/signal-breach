@@ -93,7 +93,7 @@ export function createGame({ seed, meta = { upgrades: {} } } = {}) {
     },
     screen: 'map',
     battle: null,
-    pending: { draft: null, draftQueue: [], event: null, shop: null, supply: null },
+    pending: { draft: null, draftQueue: [], event: null, shop: null, supply: null, victory: null },
     result: null,
     focusId: null,
     log: [],
@@ -697,24 +697,52 @@ function onBattleWin(g) {
   const node = g.map.nodes[g.battle.nodeId];
   const gain = creditsForNode(g, node);
   g.credits += gain;
-  log(g, `戰鬥結束，取得 ${gain} 信用點。`, true);
 
   // 戰後自動修復一小段，補給節點負責大回復
   const healPct = node.type === 'elite' ? TUNE.WIN_HEAL_PCT * 1.5 : TUNE.WIN_HEAL_PCT;
+  const healed = [];
   for (const u of aliveOf(g, 'p')) {
+    const before = u.hp;
     u.hp = Math.min(u.mhp, u.hp + Math.max(1, Math.round(u.mhp * healPct)));
+    if (u.hp > before) healed.push({ name: u.n, amount: u.hp - before, hp: u.hp, mhp: u.mhp });
   }
 
   // 陣亡隊員以 35% Max HP 歸隊：失誤要有代價，但不該一次失誤就直接崩盤
+  const recovered = [];
   for (const id of g.battle.downed) {
     const u = g.squad.find((v) => v.id === id);
     if (!u) continue;
     u.alive = 1;
     u.hp = Math.max(1, Math.round(u.mhp * 0.35));
+    recovered.push({ name: u.n, hp: u.hp });
     log(g, `${u.n} 被拖回運輸艦，以 ${u.hp} HP 歸隊。`);
   }
 
-  if (node.type === 'elite') {
+  // 停在勝利畫面，不要直接彈回地圖。
+  // 「打倒最後一個敵人」是一場戰鬥的高潮，沒有結算畫面等於把那個瞬間吃掉。
+  g.pending.victory = {
+    nodeType: node.type,
+    floor: node.floor,
+    credits: gain,
+    turns: g.battle.turn,
+    kills: g.battle.units.filter((u) => u.tm === 'e' && !u.alive).length,
+    healed,
+    recovered,
+    eliteReward: node.type === 'elite',
+    isBoss: node.type === 'boss',
+  };
+  g.screen = 'victory';
+  sfx(g, 'victory');
+  log(g, `敵人已肅清，取得 ${gain} 信用點。`, true);
+}
+
+// 玩家按下「繼續推進」之後才真正離開戰場
+export function closeVictory(g) {
+  const v = g.pending.victory;
+  if (!v) return false;
+  g.pending.victory = null;
+
+  if (v.eliteReward) {
     const target = focusUnit(g);
     if (target) {
       queueDraft(g, target.id, 'elite');
@@ -722,17 +750,19 @@ function onBattleWin(g) {
     }
   }
 
-  if (node.type === 'boss') {
+  if (v.isBoss) {
     finishRun(g, true);
-    return;
+    return true;
   }
 
   g.battle = null;
   g.screen = 'map';
+  return true;
 }
 
 function onBattleLose(g) {
   log(g, '全隊失去戰鬥能力。', true);
+  sfx(g, 'defeat');
   finishRun(g, false);
 }
 
@@ -762,6 +792,7 @@ export function finishRun(g, won) {
   g.pending.event = null;
   g.pending.shop = null;
   g.pending.supply = null;
+  g.pending.victory = null;
   g.screen = 'result';
   log(g, won ? `任務完成，取得 ${cores} 核心碎片。` : `任務失敗，回收 ${cores} 核心碎片。`, true);
 }
@@ -1029,6 +1060,7 @@ export function serializeState(g) {
     pendingEvent: g.pending.event ? { id: g.pending.event.id, resolved: !!g.pending.event.resolved } : null,
     pendingShop: g.pending.shop ? { items: g.pending.shop.items.map((i) => ({ id: i.id, kind: i.kind, price: i.price, sold: i.sold })) } : null,
     pendingSupply: g.pending.supply ? { resolved: g.pending.supply.resolved } : null,
+    pendingVictory: g.pending.victory ? { nodeType: g.pending.victory.nodeType, credits: g.pending.victory.credits, isBoss: g.pending.victory.isBoss } : null,
     result: g.result,
     logs: g.log.slice(-8).map((l) => l.text),
   };

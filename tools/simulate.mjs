@@ -12,7 +12,7 @@ import {
   createGame, enterNode, availableNodes, aliveOf, squadAlive,
   attackUnit, moveUnit, endPlayerTurn, runEnemyPhase, reachableTiles,
   damageOf, dist, key, pickDraftCard, chooseEventOption, closeEvent,
-  buyShopItem, leaveShop, chooseSupply, closeSupply,
+  buyShopItem, leaveShop, chooseSupply, closeSupply, closeVictory,
 } from '../src/engine.js';
 import { META_UPGRADES, TUNE, FLOORS } from '../src/data.js';
 
@@ -204,6 +204,7 @@ function playRun(seed, meta) {
     switch (g.screen) {
       case 'map': if (!botChooseNode(g)) return { ...summarize(g), stuck: true }; break;
       case 'battle': botBattle(g); break;
+      case 'victory': closeVictory(g); break;
       case 'event': botEvent(g); break;
       case 'shop': botShop(g); break;
       case 'supply': botSupply(g); break;

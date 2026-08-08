@@ -6,10 +6,11 @@ import {
   createGame, enterNode, tapBoard, setActionMode, endPlayerTurn, stepEnemy,
   selectUnit, spendSkillPoint, pickDraftCard, chooseEventOption, closeEvent,
   buyShopItem, leaveShop, chooseSupply, closeSupply, setFocus, finishRun,
-  serializeState, log, queueDraft,
+  serializeState, log, queueDraft, closeVictory,
 } from './engine.js';
 import { loadMeta, saveMeta, buyUpgrade, recordRun, resetMeta } from './meta.js';
 import { loadAssets, assetCount } from './assets.js';
+import { ensureAudio, playSfx, setMusicMode, toggleMusic, toggleSfx, audioState } from './audio.js';
 import { renderBattle, renderMap, renderIdle, pickBoardTile, pickMapNode } from './render.js';
 import { createUI, hudHtml } from './ui.js';
 import { dailySeed } from './rng.js';
@@ -25,47 +26,30 @@ let meta = loadMeta();
 let g = null;
 let fxList = [];
 let hoverNodeId = null;
-let audioOn = true;
-let audioCtx = null;
 let aiAcc = 0;
 let resultRecorded = false;
 let lastFrame = performance.now();
 
-// ---------------------------------------------------------------- 音效
+// ---------------------------------------------------------------- 音樂段落
 
-function playSfx(kind, base) {
-  if (!audioOn) return;
-  try {
-    if (!audioCtx) {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return;
-      audioCtx = new AC();
-    }
-    const now = audioCtx.currentTime;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    const preset = {
-      move: { f: [base || 240, base || 280], d: 0.07, v: 0.02, t: 'triangle' },
-      fire: { f: [base || 520, (base || 520) * 1.2], d: 0.09, v: 0.035, t: 'sawtooth' },
-      hit: { f: [base || 310, (base || 310) * 0.7], d: 0.08, v: 0.028, t: 'square' },
-      kill: { f: [base || 160, (base || 160) * 1.6], d: 0.22, v: 0.04, t: 'triangle' },
-      level: { f: [base || 560, (base || 560) * 1.25, (base || 560) * 1.5], d: 0.26, v: 0.04, t: 'sine' },
-      ui: { f: [base || 620, (base || 620) * 1.08], d: 0.1, v: 0.025, t: 'sine' },
-    }[kind] || { f: [440], d: 0.08, v: 0.02, t: 'sine' };
+// 依目前畫面決定 BGM 的強度。Boss 戰另外拉高。
+function musicModeFor(game) {
+  if (!game) return 'hub';
+  if (game.screen === 'battle' || game.screen === 'victory') {
+    return game.battle?.nodeType === 'boss' ? 'boss' : 'battle';
+  }
+  if (game.screen === 'hub') return 'hub';
+  if (game.screen === 'result') return 'result';
+  return 'map';
+}
 
-    osc.type = preset.t;
-    osc.frequency.setValueAtTime(preset.f[0], now);
-    for (let i = 1; i < preset.f.length; i++) {
-      osc.frequency.linearRampToValueAtTime(preset.f[i], now + (preset.d * i) / preset.f.length);
-    }
-    gain.gain.setValueAtTime(0.001, now);
-    gain.gain.exponentialRampToValueAtTime(preset.v, now + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + preset.d);
-    osc.start(now);
-    osc.stop(now + preset.d + 0.02);
-  } catch { /* 音效失敗不該影響遊戲 */ }
+// 瀏覽器規定要有使用者手勢才能出聲，所以第一次互動時解鎖 AudioContext
+function unlockAudio() {
+  ensureAudio();
+  setMusicMode(musicModeFor(g));
+}
+for (const ev of ['pointerdown', 'keydown', 'touchstart']) {
+  window.addEventListener(ev, unlockAudio, { once: true });
 }
 
 // ---------------------------------------------------------------- run 生命週期
@@ -98,7 +82,8 @@ function commitResult() {
 // ---------------------------------------------------------------- 動作表（UI 與快捷鍵共用）
 
 const actions = {
-  audio() { audioOn = !audioOn; ui.invalidate(); },
+  music() { toggleMusic(); ui.invalidate(); },
+  sfx() { toggleSfx(); playSfx('click'); ui.invalidate(); },
   toHub() { toHub(true); },
 
   startRun() { newRun(); },
@@ -149,6 +134,7 @@ const actions = {
     if (!res.ok) log(g, res.reason, true);
   },
   supplyClose() { closeSupply(g); },
+  victoryClose() { closeVictory(g); },
 };
 
 const ui = createUI(panelRoot, actions);
@@ -171,7 +157,7 @@ canvas.addEventListener('click', (ev) => {
 
   if (g.screen === 'map') {
     const id = pickMapNode(g, size, p.x, p.y);
-    if (id) enterNode(g, id);
+    if (id) { playSfx('node'); enterNode(g, id); }
     return;
   }
   if (g.screen === 'battle') {
@@ -195,7 +181,8 @@ document.addEventListener('keydown', (ev) => {
   if (k === 'm') actions.mode('move');
   if (k === 'a') actions.mode('attack');
   if (k === 'e') actions.endturn();
-  if (k === 's') actions.audio();
+  if (k === 's') actions.sfx();
+  if (k === 'b') actions.music();
   if (k === 'f') {
     if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
     else document.exitFullscreen().catch(() => {});
@@ -263,7 +250,7 @@ function update(dt) {
 
 function draw(time) {
   const size = canvasSize();
-  if (g.screen === 'battle' && g.battle) renderBattle(ctx, g, size, time, fxList);
+  if ((g.screen === 'battle' || g.screen === 'victory') && g.battle) renderBattle(ctx, g, size, time, fxList);
   else if (g.screen === 'hub') renderIdle(ctx, g, size, '作戰基地');
   else if (g.screen === 'result') renderIdle(ctx, g, size, g.result?.won ? '出擊成功' : '出擊失敗');
   else renderMap(ctx, g, size, time, hoverNodeId);
@@ -274,7 +261,8 @@ function frame(now) {
   lastFrame = now;
   update(dt);
   draw(now);
-  ui.render(g, meta, { audioOn });
+  setMusicMode(musicModeFor(g));
+  ui.render(g, meta, audioState());
   hudRoot.innerHTML = hudHtml(g);
   requestAnimationFrame(frame);
 }
@@ -306,8 +294,10 @@ window.__meta = () => meta;
 window.__debug = {
   queueDraft: (unitId, source = 'levelup') => queueDraft(g, unitId, source),
   finishRun: (won) => finishRun(g, won),
+  tapBoard: (x, y) => tapBoard(g, x, y),
 };
 window.__assets = () => assetCount();
+window.__audio = () => audioState();
 
 // 一鍵驗證：跑完一整段核心流程（開 run → 進戰鬥 → 打贏 → 回地圖）
 window.test_run_full_flow = () => {
@@ -346,10 +336,17 @@ window.test_run_full_flow = () => {
     if (!acted) endPlayerTurn(g);
   }
 
+  // 肅清後應該停在通關結算畫面，按下「繼續推進」才回地圖
+  const sawVictory = g.screen === 'victory' && !!g.pending.victory;
+  const victoryCredits = g.pending.victory?.credits ?? 0;
+  if (sawVictory) closeVictory(g);
+
   const state = serializeState(g);
   return {
-    ok: enteredBattle && g.stats.kills > 0 && (g.screen === 'map' || g.screen === 'result'),
+    ok: enteredBattle && g.stats.kills > 0 && sawVictory && (g.screen === 'map' || g.screen === 'result'),
     enteredBattle,
+    sawVictory,
+    victoryCredits,
     kills: g.stats.kills,
     credits: g.credits,
     screen: g.screen,

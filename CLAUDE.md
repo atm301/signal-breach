@@ -45,7 +45,8 @@ src/
   data.js           ★ 所有可調數值。改平衡只動這裡
   mapgen.js         隨機分岔關卡樹生成 + 連通性驗證
   engine.js         ★ 純邏輯：戰鬥、AI、run 狀態機、事件／商店／補給。零 DOM
-  meta.js           localStorage 跨 run 永久進度。唯一碰 localStorage 的檔案
+  meta.js           localStorage 跨 run 永久進度
+  audio.js          Web Audio 即時合成的音效與 BGM。零音檔
   assets.js         AI 素材載入 + 損傷階段判定。缺圖時優雅降級
   render.js         canvas 繪製（戰鬥棋盤 + 關卡樹）。只讀 state，不改
   ui.js             DOM 面板。重建 innerHTML + 事件委派，靠 signature 比對避免每幀重繪
@@ -72,6 +73,8 @@ serve.mjs           零依賴靜態伺服器（開發 + 測試共用）
 - **AP 只用來移動。攻擊每回合限一次，且需保留 1 AP。**
   這條是刻意的，理由寫在 BALANCE.md 第 1 節。拿掉它戰鬥會退化成 2 回合互砍。
 - **掩體**對距離 >= 2 的攻擊減傷 1。近戰不受掩體影響。
+- 肅清全部敵人後會停在**通關結算畫面**（`screen === 'victory'`），按「繼續推進」才回地圖。
+  加新畫面時記得同步教會 `tools/simulate.mjs` 的機器人，否則模擬器會卡住。
 - 一個 run = 12 層（F0 登陸點 → F11 頭目），中間走分岔路線。
 - 戰鬥中陣亡的隊員，**戰後以 35% Max HP 歸隊**；全隊同時倒下才算 run 結束。
 - Run 結束（含中途放棄）都會結算核心碎片並寫進 localStorage。
@@ -132,6 +135,8 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 | 改敵方 AI | `src/engine.js` 的 `bestTarget` / `bestMove` / `actEnemy` |
 | 改畫面 | `src/render.js`（canvas）或 `src/ui.js`（面板） |
 | 改損傷階段門檻 | `src/assets.js` 的 `damageState`（目前 66% / 33%） |
+| 改音樂／音效 | `src/audio.js`。`SFX` 是音效配方表，`MODES` 是四種 BGM 段落 |
+| 改單位朝向 | `src/render.js` 的 `facingOf` |
 | 換素材風格 | `codex/style-guide.md` 的 code block，然後全部重生 |
 
 **加了新的節點類型或新畫面時，記得同步更新 `tools/simulate.mjs` 的機器人**，

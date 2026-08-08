@@ -31,6 +31,15 @@ const panelHasContent = await page.evaluate(() => document.getElementById('panel
 await page.waitForFunction(() => window.__assets && window.__assets().ready, null, { timeout: 15000 }).catch(() => {});
 const assets = await page.evaluate(() => window.__assets());
 
+// 1c) 音效系統：瀏覽器規定要有使用者手勢才能出聲，所以先點一下再驗。
+//     不驗的話「沒聲音」只會在真人玩的時候才發現。
+await page.mouse.click(5, 5);
+await page.waitForTimeout(400);
+const audio = await page.evaluate(() => window.__audio());
+await page.evaluate(() => { window.game_actions.startRun(); });
+await page.waitForTimeout(200);
+const audioInRun = await page.evaluate(() => window.__audio());
+
 // 2) 核心流程：開 run → 進戰鬥 → 擊殺 → 回地圖
 const flow = await page.evaluate(() => window.test_run_full_flow());
 const afterFlow = JSON.parse(await page.evaluate(() => window.render_game_to_text()));
@@ -109,8 +118,15 @@ const assertions = {
   panelRendered: panelHasContent,
   unitSpritesLoaded: assets.units === 33, // 11 個單位 x 3 個損傷階段
   propSpritesLoaded: assets.props === 6,
+  iconSpritesLoaded: assets.icons === 8,
+  uiSpritesLoaded: assets.ui === 1,
+  audioContextStarted: audio.started === true,
+  musicPlaying: audio.mode !== null,
+  musicSwitchesWithScreen: audioInRun.mode === 'map',
   flowCompleted: !!flow.ok,
   enteredBattle: !!flow.enteredBattle,
+  victoryScreenShown: !!flow.sawVictory,
+  victoryAwardedCredits: flow.victoryCredits > 0,
   gotKills: flow.kills > 0,
   earnedCredits: flow.credits > 0,
   mapConnected: mapOk.connected,

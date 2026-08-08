@@ -123,6 +123,39 @@
       "prompt": "A wide landscape 3:2 game asset sheet containing exactly 6 top-down military science-fiction battlefield props, laid out in a clean grid of 2 rows and 3 columns, with equal generous flat magenta gaps between every object. No object may touch, overlap or cast anything onto another. All 6 objects are seen from STRAIGHT OVERHEAD and drawn at the same scale, each centred in its own invisible cell, each with a roughly square footprint. ROW 1 is the SAME barricade three times, identical design and colour, only the damage changes: cell 1 is a pristine heavy armoured barricade block, a rectangular gunmetal cover barrier with visible bolt heads, panel seams and a chipped yellow-black hazard stripe along one edge; cell 2 is the same barricade moderately damaged with dents, scorch marks, a cracked corner and chipped paint; cell 3 is the same barricade blown apart into a low pile of twisted buckled plates and rubble with glowing orange embers. ROW 2 contains three different objects: cell 1 is a circular metal landing pad marker set into the ground, concentric rings with worn chevron arrows pointing inward and dim cyan-blue guide lights; cell 2 is a scatter of battlefield debris, broken armour fragments, spent shell casings and torn cabling; cell 3 is a sealed military supply crate with reinforced corners, latches and a small green status light",
       "image": "items/sheet-terrain.png",
       "generated_at": "2026-08-03T16:51:03.829Z"
+    },
+    {
+      "id": "sheet-map-icons",
+      "name": "關卡節點圖示",
+      "rows": 2,
+      "cols": 4,
+      "cells": [
+        [
+          "icon-start",
+          "icon-battle",
+          "icon-elite",
+          "icon-event"
+        ],
+        [
+          "icon-supply",
+          "icon-shop",
+          "icon-boss",
+          "icon-core"
+        ]
+      ],
+      "style_override": "Style: military science-fiction user interface iconography. Each icon is a bold engraved emblem sitting on a circular brushed-gunmetal badge with a strong emissive edge glow. Flat straight-on view, no perspective, no isometric tilt. Thick heavy strokes and large simple shapes only — every icon must stay instantly readable when scaled down to 40 pixels, so no thin hairlines, no fine detail, no small marks. High contrast against the badge face, crisp hard edges, no soft drop shadow. Background MUST be one flat uniform pure magenta #FF00FF field with absolutely nothing else on it, no gradient, no vignette, no shadow or glow bleeding onto the magenta. Every icon fully separated from every other icon by clear empty magenta space. No text, no letters, no numbers, no labels, no watermark, no signature, no frame.",
+      "prompt": "A wide landscape 3:2 asset sheet containing exactly 8 science-fiction map node icons, laid out in a clean grid of 2 rows and 4 columns with equal generous flat magenta gaps between every icon. No icon may touch or overlap another. All 8 icons are drawn at exactly the same scale, each centred in its own invisible cell, each one a circular badge of the same diameter. ROW 1 left to right: (1) LANDING ZONE - a bold downward-pointing chevron centred inside a circular landing pad with four short guide ticks, cyan-blue emissive; (2) FIREFIGHT - two heavy crossed rifles forming an X, steel grey with warm amber emissive edge; (3) ELITE THREAT - an angular armoured skull sigil inside a bold warning hexagon, deep red emissive; (4) UNKNOWN SIGNAL - three thick expanding concentric arcs radiating from a solid dot, like a radio transmission burst, violet-blue emissive. ROW 2 left to right: (5) SUPPLY - a thick blocky cross on a rounded supply crate, green emissive; (6) BLACK MARKET - a bold stack of three thick credit chips seen edge-on, amber-gold emissive; (7) BOSS - a heavy angular crowned sigil with four sharp spikes, crimson emissive; (8) CORE SHARD - a single bold faceted crystal shard standing upright, cyan-white emissive",
+      "image": "items/sheet-map-icons.png",
+      "generated_at": "2026-08-08T05:48:53.630Z"
+    },
+    {
+      "id": "panel-backdrop",
+      "name": "右側面板背景板",
+      "slice": false,
+      "style_override": "Style: military science-fiction user interface surface art. Flat straight-on view, no perspective. Very dark desaturated palette built on #0C151C and #17262F, with restrained cyan-blue #5DB6FF emissive accents confined to the outer edges and corners only. Deliberately subtle and low contrast — this is a background plate that white text will be laid on top of, it must never compete with the text for attention. Fine even surface detail, no large bright areas, no strong vignette, no film grain, no noise. No text, no letters, no numbers, no labels, no readouts, no screens, no watermark, no signature, no logo.",
+      "prompt": "A tall portrait 2:3 science-fiction control panel background plate that fills the entire frame edge to edge. A dark brushed gunmetal surface with faint etched circuit traces, a very subtle large hexagonal mesh, thin horizontal seam lines and small recessed rivets along the outer margins. Heavy angular bracket corner reinforcements at all four corners, each with a faint thin cyan-blue emissive edge line. A narrow vertical cyan-blue accent strip running down the extreme left margin. The central eighty percent of the plate is intentionally very dark, flat, even and low contrast with almost no detail, because interface text will be placed directly on top of it",
+      "image": "items/panel-backdrop.png",
+      "generated_at": "2026-08-08T05:50:08.751Z"
     }
   ]
 }

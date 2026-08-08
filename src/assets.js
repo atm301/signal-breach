@@ -15,6 +15,8 @@ const state = {
   manifest: null,
   units: new Map(),
   props: new Map(),
+  icons: new Map(),
+  ui: new Map(),
 };
 
 function loadImage(url) {
@@ -38,11 +40,10 @@ export async function loadAssets() {
 
   const ext = state.manifest.ext ?? 'png';
   const jobs = [];
-  for (const name of state.manifest.units ?? []) {
-    jobs.push(loadImage(`${BASE}/units/${name}.${ext}`).then((img) => img && state.units.set(name, img)));
-  }
-  for (const name of state.manifest.props ?? []) {
-    jobs.push(loadImage(`${BASE}/props/${name}.${ext}`).then((img) => img && state.props.set(name, img)));
+  for (const group of ['units', 'props', 'icons', 'ui']) {
+    for (const name of state.manifest[group] ?? []) {
+      jobs.push(loadImage(`${BASE}/${group}/${name}.${ext}`).then((img) => img && state[group].set(name, img)));
+    }
   }
   await Promise.all(jobs);
   state.ready = true;
@@ -78,6 +79,24 @@ export function coverSprite(x, y) {
   return propSprite(pick) ?? propSprite('cover-intact');
 }
 
+// 關卡節點圖示。node type 直接對應檔名。
+export function nodeIcon(type) {
+  return state.icons.get(`icon-${type}`) ?? null;
+}
+
+// 給 DOM 面板用的 data URL，這樣清單裡也能顯示同一組圖示
+const dataUrlCache = new Map();
+export function nodeIconUrl(type) {
+  const key = `icon-${type}`;
+  if (dataUrlCache.has(key)) return dataUrlCache.get(key);
+  const img = state.icons.get(key);
+  if (!img) return null;
+  const ext = state.manifest?.ext ?? 'webp';
+  const url = `${BASE}/icons/${key}.${ext}`;
+  dataUrlCache.set(key, url);
+  return url;
+}
+
 export function assetsReady() {
   return state.ready;
 }
@@ -85,5 +104,11 @@ export function assetsReady() {
 // ready 一定要一起回傳。只看 units > 0 會在還在載的時候就判定完成，
 // 測試會拿到「載到一半」的數字而偶發失敗。
 export function assetCount() {
-  return { ready: state.ready, units: state.units.size, props: state.props.size };
+  return {
+    ready: state.ready,
+    units: state.units.size,
+    props: state.props.size,
+    icons: state.icons.size,
+    ui: state.ui.size,
+  };
 }

@@ -40,18 +40,29 @@ const OUT_SIZE = Number(args.size ?? 256);
 const EXT = 'webp'; // 帶 alpha 的 WebP，同畫質約為 PNG 的三分之一大小
 
 // 素材表清單直接讀 items.json，rows / cols / cells 是同一份真相來源
+const ALL_ITEMS = () => JSON.parse(fs.readFileSync(path.join(ROOT, 'codex', 'data', 'items.json'), 'utf-8')).items
+  .filter((it) => it.image && fs.existsSync(path.join(SHEET_DIR, it.image)));
+
+// 要切格子的素材表
 function loadSheets() {
-  const items = JSON.parse(fs.readFileSync(path.join(ROOT, 'codex', 'data', 'items.json'), 'utf-8')).items;
-  return items
-    .filter((it) => it.image && fs.existsSync(path.join(SHEET_DIR, it.image)))
+  const dirOf = (id) => (id === 'sheet-terrain' ? 'props' : id === 'sheet-map-icons' ? 'icons' : 'units');
+  return ALL_ITEMS()
+    .filter((it) => it.slice !== false)
     .map((it) => ({
       id: it.id,
       file: path.join(SHEET_DIR, it.image),
       rows: it.rows,
       cols: it.cols,
       cells: it.cells,
-      outDir: it.id === 'sheet-terrain' ? 'props' : 'units',
+      outDir: dirOf(it.id),
     }));
+}
+
+// slice:false 的是整張要用的圖（例如面板背景板），只轉檔不切格
+function loadWhole() {
+  return ALL_ITEMS()
+    .filter((it) => it.slice === false)
+    .map((it) => ({ id: it.id, file: path.join(SHEET_DIR, it.image) }));
 }
 
 // ---------------------------------------------------------------- 瀏覽器端的切圖核心
@@ -188,11 +199,18 @@ async function sliceInPage(page, dataUrl, rows, cols, outSize) {
       tctx.drawImage(src, minX, minY, bw, bh, (box - bw) / 2, (box - bh) / 2, bw, bh);
 
       // 去背 + despill
+      //
+      // ⚠️ 一定要「取最小值」而不是直接覆寫 alpha。
+      // 共用框比主體大，四周是畫布原本就透明的區域 rgba(0,0,0,0)，
+      // 而 magentaness(0,0,0) = 0 會被判定成「純素材」→ alpha 直接被寫成 255，
+      // 整張圖就多出一圈不透明的黑框。旋轉單位時會變成明顯的黑色方塊。
       const idata = tctx.getImageData(0, 0, box, box);
       const p = idata.data;
       for (let i = 0; i < p.length; i += 4) {
+        const a0 = p[i + 3];
+        if (a0 === 0) continue; // 本來就是空的，別去動它
         const m = magentaness(p[i], p[i + 1], p[i + 2]);
-        p[i + 3] = alphaOf(m);
+        p[i + 3] = Math.min(a0, alphaOf(m));
         if (m > 0) {
           // 把溢到素材上的洋紅拉回綠色通道的水準，消掉粉紅鑲邊
           p[i] = Math.max(0, p[i] - m * 0.9);
@@ -210,11 +228,25 @@ async function sliceInPage(page, dataUrl, rows, cols, outSize) {
       octx.imageSmoothingQuality = 'high';
       octx.drawImage(tmp, 0, 0, outSize, outSize);
 
+      // 自我檢查：四角必須是全透明。
+      // 這條是有代價換來的 —— 上面那個 alpha 覆寫的 bug 讓所有素材帶了一圈不透明黑框，
+      // 因為底色深、貼在深色棋盤上幾乎看不出來，整整一天沒人發現，
+      // 直到單位開始旋轉才露餡。所以現在每次切圖都驗一次。
+      const od = octx.getImageData(0, 0, outSize, outSize).data;
+      let cornerAlpha = 0;
+      const k = Math.max(4, Math.round(outSize * 0.05));
+      for (const [ox, oy] of [[0, 0], [outSize - k, 0], [0, outSize - k], [outSize - k, outSize - k]]) {
+        for (let y = oy; y < oy + k; y++) {
+          for (let x = ox; x < ox + k; x++) cornerAlpha = Math.max(cornerAlpha, od[(y * outSize + x) * 4 + 3]);
+        }
+      }
+
       results.push({
         row: b.row,
         col: b.col,
         empty: false,
         hits: b.hits,
+        cornerAlpha,
         box: { x: minX, y: minY, w: bw, h: bh },
         share: box,
         // WebP 帶 alpha，同畫質下大約是 PNG 的三分之一大小。
@@ -265,8 +297,35 @@ for (const sheet of sheets) {
     fs.writeFileSync(out, Buffer.from(cell.dataUrl.split(',')[1], 'base64'));
     written++;
     const fill = ((cell.hits / (cell.box.w * cell.box.h)) * 100).toFixed(0);
-    console.log(`  ✓ ${name.padEnd(22)} bbox ${String(cell.box.w).padStart(4)}x${String(cell.box.h).padStart(4)}  填充 ${fill}%`);
+    const bad = cell.cornerAlpha > 8;
+    if (bad) problems.push(`${name} 四角不透明（alpha ${cell.cornerAlpha}），去背壞掉了`);
+    console.log(`  ${bad ? '✗' : '✓'} ${name.padEnd(22)} bbox ${String(cell.box.w).padStart(4)}x${String(cell.box.h).padStart(4)}  填充 ${fill}%  角落alpha ${cell.cornerAlpha}`);
   }
+}
+
+// slice:false 的整張圖：只縮放轉檔，不去背也不切格
+for (const whole of loadWhole()) {
+  const buf = fs.readFileSync(whole.file);
+  const dataUrl = `data:image/png;base64,${buf.toString('base64')}`;
+  const out = await page.evaluate(async ({ dataUrl, maxW }) => {
+    const img = new Image();
+    img.src = dataUrl;
+    await img.decode();
+    const scale = Math.min(1, maxW / img.naturalWidth);
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * scale);
+    c.height = Math.round(img.naturalHeight * scale);
+    const cx = c.getContext('2d');
+    cx.imageSmoothingQuality = 'high';
+    cx.drawImage(img, 0, 0, c.width, c.height);
+    return { w: c.width, h: c.height, dataUrl: c.toDataURL('image/webp', 0.9) };
+  }, { dataUrl, maxW: 640 });
+
+  const dir = path.join(OUT_ROOT, 'ui');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${whole.id}.${EXT}`), Buffer.from(out.dataUrl.split(',')[1], 'base64'));
+  written++;
+  console.log(`\n${whole.id}  整張輸出 ${out.w}x${out.h}（不切格）`);
 }
 
 await browser.close();
@@ -274,8 +333,8 @@ await browser.close();
 // 產 manifest：載入器只會去要「manifest 上有的檔案」。
 // 不這樣做的話，缺圖會在瀏覽器 console 噴 404，Playwright 測試的
 // noConsoleErrors 斷言就會紅，等於用測試失敗來報告一件本來該優雅降級的事。
-const manifest = { size: OUT_SIZE, ext: EXT, units: [], props: [] };
-for (const dir of ['units', 'props']) {
+const manifest = { size: OUT_SIZE, ext: EXT, units: [], props: [], icons: [], ui: [] };
+for (const dir of ['units', 'props', 'icons', 'ui']) {
   const full = path.join(OUT_ROOT, dir);
   if (!fs.existsSync(full)) continue;
   manifest[dir] = fs.readdirSync(full)
@@ -286,7 +345,7 @@ for (const dir of ['units', 'props']) {
 fs.writeFileSync(path.join(OUT_ROOT, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 
 console.log(`\n共輸出 ${written} 張 ${OUT_SIZE}x${OUT_SIZE} ${EXT.toUpperCase()} 到 assets/`);
-console.log(`manifest：units ${manifest.units.length} 張、props ${manifest.props.length} 張`);
+console.log(`manifest：units ${manifest.units.length} / props ${manifest.props.length} / icons ${manifest.icons.length} / ui ${manifest.ui.length}`);
 if (problems.length) {
   console.log('\n⚠ 需要處理：');
   for (const p of problems) console.log(`   - ${p}`);

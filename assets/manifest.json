@@ -43,5 +43,18 @@
     "debris",
     "landing-pad",
     "supply-crate"
+  ],
+  "icons": [
+    "icon-battle",
+    "icon-boss",
+    "icon-core",
+    "icon-elite",
+    "icon-event",
+    "icon-shop",
+    "icon-start",
+    "icon-supply"
+  ],
+  "ui": [
+    "panel-backdrop"
   ]
 }

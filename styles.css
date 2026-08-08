@@ -29,8 +29,21 @@ body {
   align-items: start;
 }
 
-.card { border: 1px solid var(--line); border-radius: 12px; background: #11222c; }
-.stage { padding: 10px; position: sticky; top: 14px; }
+/* AI 生成的科技感面板底板。用 border-image 九宮格而不是 background-size:100% 100%，
+   面板高度會隨內容變，直接拉伸會把角落支架扯歪。fill 讓中央的蝕刻紋理也畫出來。 */
+.card {
+  border: 22px solid transparent;
+  border-image: url('assets/ui/panel-backdrop.webp') 96 fill / 22px stretch;
+  border-radius: 4px;
+  background: #11222c;
+}
+
+/* 沒有素材時的退路，避免只剩一片空白 */
+@supports not (border-image: url('') 1 fill / 1px stretch) {
+  .card { border: 1px solid var(--line); border-radius: 12px; }
+}
+
+.stage { padding: 4px; position: sticky; top: 14px; }
 
 #game {
   width: 100%;
@@ -64,9 +77,10 @@ body {
 .topbar .stat b { display: block; color: var(--ink); font-size: 14px; }
 .topbar .seed { font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: 1px; }
 
-.row3, .row2 { display: grid; gap: 8px; margin-top: 8px; }
+.row3, .row2, .row1 { display: grid; gap: 8px; margin-top: 8px; }
 .row3 { grid-template-columns: repeat(3, 1fr); }
 .row2 { grid-template-columns: repeat(2, 1fr); }
+.row1 { grid-template-columns: 1fr; }
 
 button, input {
   font: inherit;
@@ -116,6 +130,41 @@ input { padding: 6px 8px; width: 100%; }
 .highlight h2 { color: #a8f5c0; }
 .highlight.fail { border-color: #a85566; background: #2b1219; }
 .highlight.fail h2 { color: #ffb3c0; }
+
+/* 通關結算：要看起來像獎勵，不是像另一個表單 */
+.highlight.victory {
+  border-color: #8fe0b0;
+  background: linear-gradient(160deg, #143a2c 0%, #122b26 60%, #11242a 100%);
+  box-shadow: 0 0 0 1px rgba(143, 224, 176, .25) inset, 0 6px 24px rgba(0, 0, 0, .35);
+  animation: victoryIn .28s ease-out;
+}
+.highlight.victory h2 { color: #b8ffd0; font-size: 17px; letter-spacing: 1px; }
+@keyframes victoryIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: none; }
+}
+.reward {
+  margin: 10px 0 4px;
+  text-align: center;
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--gold);
+  text-shadow: 0 0 18px rgba(255, 217, 128, .35);
+}
+
+button.primary {
+  background: #1d5a44;
+  border-color: var(--ok);
+  color: #d9ffe6;
+  font-weight: 700;
+}
+button.primary:hover:not(:disabled) { background: #247256; border-color: #8fe0b0; }
+
+/* 地圖清單裡的節點圖示 */
+.node-icon {
+  width: 26px; height: 26px; vertical-align: -7px;
+  margin-right: 6px; image-rendering: auto;
+}
 
 .statgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 6px; }
 .statgrid > div {

@@ -108,6 +108,35 @@ await page.evaluate(() => {
 });
 await shot('6-draft');
 
+// 6b) 通關結算：把敵人全部打掉，看勝利畫面
+await page.evaluate(() => {
+  const g = window.__game();
+  if (g.pending.draft) window.game_actions.draft(g.pending.draft.cards[0].id);
+  if (g.screen !== 'battle') return;
+  const mine = g.battle.units.find((u) => u.alive && u.tm === 'p');
+  const foes = g.battle.units.filter((u) => u.alive && u.tm === 'e');
+  // 留最後一隻讓玩家的攻擊真的觸發勝利流程，其餘直接判死
+  foes.slice(1).forEach((f) => { f.hp = 0; f.alive = 0; });
+  const last = foes[0];
+  if (last && mine) {
+    last.hp = 1;
+    last.x = mine.x;
+    last.y = Math.max(0, mine.y - Math.min(mine.rg, mine.y));
+    mine.attacked = 0;
+    mine.ap = mine.map;
+    g.battle.selectedId = mine.id;
+    g.battle.actionMode = 'attack';
+    window.__game().battle.phase = 'player';
+    window.tapBoardForShot?.();
+  }
+});
+await page.evaluate(() => {
+  const g = window.__game();
+  const last = g.battle?.units.find((u) => u.alive && u.tm === 'e');
+  if (last) window.__debug.tapBoard(last.x, last.y);
+});
+await shot('6b-victory');
+
 // 7) run 結算畫面
 await page.evaluate(() => {
   g_unused: { /* noop */ }

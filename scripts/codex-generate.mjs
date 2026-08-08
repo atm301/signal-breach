@@ -146,6 +146,10 @@ if (isComic) {
 const targetPath = path.join(IMG_DIR, subdir, filename);
 fs.mkdirSync(path.dirname(targetPath), { recursive: true });
 
+// 每個 entry 可以自帶 style_override。UI 圖示、背景板、寫實單位素材
+// 三者的美術方向完全不同，共用一套 STYLE_BASE 會互相打架。
+if (entry.style_override) styleSuffix = entry.style_override;
+
 const fullPrompt = `${entry.prompt}. ${styleSuffix}`;
 
 console.log(`\n📸 生成中：${kind} / ${id}`);

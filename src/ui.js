@@ -4,6 +4,8 @@
 import { TREE, META_UPGRADES, NODE_TYPES, FLOORS } from './data.js';
 import { availableNodes, squadAlive, xpToNext, unitById } from './engine.js';
 import { upgradeList } from './meta.js';
+import { playSfx } from './audio.js';
+import { nodeIconUrl } from './assets.js';
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -17,13 +19,23 @@ const btn = (act, label, opts = {}) => {
 
 export function createUI(root, actions) {
   // 單一委派：面板重建幾百次也不用重綁
+  // 每個可點的東西都要有回饋音。actions 自己還會再疊語意音（購買成功、升級等），
+  // 這裡只負責「你按到了」這件事。
+  const CLICK_SFX = { goNode: 'node', music: 'ui', sfx: 'ui' };
+
   root.addEventListener('click', (ev) => {
     const el = ev.target.closest('[data-act]');
     if (!el || el.disabled) return;
     const [name, ...args] = el.dataset.act.split(':');
+    playSfx(CLICK_SFX[name] || 'click');
     const fn = actions[name];
     if (fn) fn(...args);
   });
+
+  root.addEventListener('pointerenter', (ev) => {
+    const el = ev.target instanceof Element ? ev.target.closest('button[data-act]') : null;
+    if (el && !el.disabled) playSfx('hover');
+  }, true);
 
   let lastSig = '';
 
@@ -41,12 +53,13 @@ export function createUI(root, actions) {
     g.pending.event ? `e${g.pending.event.id}${g.pending.event.resolved ? 'r' : ''}` : '-',
     g.pending.shop ? `s${g.pending.shop.items.map((i) => (i.sold ? 1 : 0)).join('')}` : '-',
     g.pending.supply ? `p${g.pending.supply.resolved ? 1 : 0}` : '-',
+    g.pending.victory ? `v${g.pending.victory.credits}` : '-',
     g.result ? 'R' : '-',
   ].join('~');
 
   return {
     render(g, meta, opts = {}) {
-      const sig = signature(g, meta) + (opts.force ? Math.random() : '');
+      const sig = `${signature(g, meta)}~${opts.music}~${opts.sfx}${opts.force ? Math.random() : ''}`;
       if (sig === lastSig) return;
       lastSig = sig;
       root.innerHTML = panelHtml(g, meta, opts);
@@ -64,6 +77,7 @@ function panelHtml(g, meta, opts) {
     case 'hub': parts.push(hubPanel(g, meta)); break;
     case 'map': parts.push(mapPanel(g)); break;
     case 'battle': parts.push(battlePanel(g)); break;
+    case 'victory': parts.push(victoryPanel(g)); break;
     case 'event': parts.push(eventPanel(g)); break;
     case 'shop': parts.push(shopPanel(g)); break;
     case 'supply': parts.push(supplyPanel(g)); break;
@@ -81,7 +95,6 @@ function panelHtml(g, meta, opts) {
 }
 
 function topBar(g, meta, opts) {
-  const audioLabel = opts.audioOn ? '音效 開' : '音效 關';
   const inRun = g.screen !== 'hub';
   return `
     <div class="topbar">
@@ -91,8 +104,11 @@ function topBar(g, meta, opts) {
       <div class="stat"><span>種子</span><b class="seed">${esc(g.seedLabel)}</b></div>
     </div>
     <div class="row2">
-      ${btn('audio', audioLabel)}
-      ${btn('toHub', '放棄並返回基地', { disabled: !inRun })}
+      ${btn('music', opts.music ? '♪ 音樂 開' : '♪ 音樂 關', { cls: opts.music ? 'on' : '' })}
+      ${btn('sfx', opts.sfx ? '♬ 音效 開' : '♬ 音效 關', { cls: opts.sfx ? 'on' : '' })}
+    </div>
+    <div class="row1">
+      ${btn('toHub', '放棄並返回基地', { disabled: !inRun, cls: 'danger' })}
     </div>`;
 }
 
@@ -149,9 +165,11 @@ function mapPanel(g) {
   const open = availableNodes(g);
   const options = open.map((n) => {
     const t = NODE_TYPES[n.type];
+    const url = nodeIconUrl(n.type);
+    const mark = url ? `<img class="node-icon" src="${url}" alt="">` : `${t.icon} `;
     return `
       <div class="item">
-        <div class="item-head"><b>${t.icon} ${esc(t.n)}</b><span class="tag">F${n.floor}</span></div>
+        <div class="item-head"><b>${mark}${esc(t.n)}</b><span class="tag">F${n.floor}</span></div>
         <div class="item-body">${esc(nodeHint(n.type))}</div>
         ${btn(`goNode:${n.id}`, '前往')}
       </div>`;
@@ -196,6 +214,44 @@ function battlePanel(g) {
         AP 用來移動，<b>攻擊每回合限一次</b>且需保留 1 AP。單位右上角有橫槓 = 已出手。<br>
         快捷鍵 M / A / E，Tab 切換單位，F 全螢幕
       </p>
+    </section>`;
+}
+
+// 打倒最後一個敵人是一場戰鬥的高潮。直接彈回地圖等於把那個瞬間吃掉，
+// 所以停在這裡讓玩家看清楚自己拿到了什麼。
+function victoryPanel(g) {
+  const v = g.pending.victory;
+  if (!v) return '';
+  const label = v.isBoss ? '頭目擊破' : v.nodeType === 'elite' ? '精英目標清除' : '區域肅清';
+
+  const healRows = v.healed.length
+    ? `<div class="item"><div class="item-head"><b>戰場修復</b></div><div class="item-body">${
+        v.healed.map((h) => `${esc(h.name)} +${h.amount} HP（${h.hp}/${h.mhp}）`).join('<br>')
+      }</div></div>`
+    : '';
+
+  const recoverRows = v.recovered.length
+    ? `<div class="item"><div class="item-head"><b>傷員歸隊</b></div><div class="item-body">${
+        v.recovered.map((r) => `${esc(r.name)} 以 ${r.hp} HP 歸隊`).join('<br>')
+      }</div></div>`
+    : '';
+
+  const bonus = v.eliteReward
+    ? '<p class="hint">精英獎勵：繼續之後會有一次額外改裝抽卡。</p>'
+    : '';
+
+  return `
+    <section class="highlight victory">
+      <h2>✦ ${esc(label)}</h2>
+      <div class="statgrid">
+        <div><span>層數</span><b>F${v.floor}</b></div>
+        <div><span>擊殺</span><b>${v.kills}</b></div>
+        <div><span>耗時</span><b>${v.turns} 回合</b></div>
+      </div>
+      <div class="reward">+${v.credits} 信用點</div>
+      <div class="list">${healRows}${recoverRows}</div>
+      ${bonus}
+      ${btn('victoryClose', v.isBoss ? '完成出擊' : '繼續推進', { cls: 'primary' })}
     </section>`;
 }
 

@@ -3,7 +3,7 @@
 
 import { GRID, FLOORS, NODE_TYPES } from './data.js';
 import { key, dist, reachableTiles, aliveOf, unitById, availableNodes } from './engine.js';
-import { unitSprite, coverSprite } from './assets.js';
+import { unitSprite, coverSprite, nodeIcon } from './assets.js';
 
 const PAD = 56;
 export const FONT = '"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif';
@@ -32,7 +32,7 @@ export function mapNodePos(size, node) {
   return {
     x: padX + node.pos * width,
     y: size - padY - node.floor * rowH, // 起點在下、Boss 在上
-    r: Math.max(11, size * 0.021),
+    r: Math.max(13, size * 0.026), // 圖示徽章需要比純文字大一點才看得清
   };
 }
 
@@ -83,18 +83,34 @@ export function renderMap(ctx, g, size, time, hoverId = null) {
     }
 
     ctx.save();
-    ctx.globalAlpha = node.visited || isOpen ? 1 : 0.45;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r * (isHover && isOpen ? 1.15 : 1), 0, Math.PI * 2);
-    ctx.fillStyle = style.fill;
-    ctx.fill();
-    ctx.strokeStyle = isCurrent ? '#ffffff' : style.ring;
-    ctx.lineWidth = isCurrent ? 3 : 2;
-    ctx.stroke();
+    ctx.globalAlpha = node.visited || isOpen ? 1 : 0.42;
 
-    ctx.fillStyle = style.ink;
-    ctx.font = `${Math.round(p.r * 1.05)}px ${FONT}`;
-    ctx.fillText(NODE_TYPES[node.type].icon, p.x, p.y + 1);
+    const icon = nodeIcon(node.type);
+    if (icon) {
+      // 圖示本身就是圓形徽章，直接畫上去，不用再墊底色
+      const d = p.r * 2.2 * (isHover && isOpen ? 1.12 : 1);
+      ctx.drawImage(icon, p.x - d / 2, p.y - d / 2, d, d);
+    } else {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * (isHover && isOpen ? 1.15 : 1), 0, Math.PI * 2);
+      ctx.fillStyle = style.fill;
+      ctx.fill();
+      ctx.strokeStyle = style.ring;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = style.ink;
+      ctx.font = `${Math.round(p.r * 1.05)}px ${FONT}`;
+      ctx.fillText(NODE_TYPES[node.type].icon, p.x, p.y + 1);
+    }
+
+    // 目前所在位置：外圈再套一層白環，跟其他節點區分開
+    if (isCurrent) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * 1.28, 0, Math.PI * 2);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
@@ -146,8 +162,9 @@ export function renderBattle(ctx, g, size, time, fxList) {
   const typeLabel = b.nodeType === 'boss' ? '頭目戰' : b.nodeType === 'elite' ? '精英交戰' : '交火';
   drawBanner(ctx, size, `F${b.floor} ${typeLabel} | 第 ${b.turn} 回合 | ${b.phase === 'player' ? '我方行動' : b.phase === 'ai' ? '敵方行動' : ''}`);
 
-  if (g.pending.draft) drawToast(ctx, size, '升級改裝中');
-  else if (b.phase === 'lose') drawToast(ctx, size, '全隊失去戰鬥能力');
+  if (b.phase === 'win') drawToast(ctx, size, b.nodeType === 'boss' ? '頭目擊破' : '區域肅清', '#a8f5c0');
+  else if (g.pending.draft) drawToast(ctx, size, '升級改裝中');
+  else if (b.phase === 'lose') drawToast(ctx, size, '全隊失去戰鬥能力', '#ffb3c0');
 }
 
 function drawGrid(ctx, cell) {
@@ -220,6 +237,23 @@ function drawHighlights(ctx, g, cell) {
   }
 }
 
+// 單位朝向：面向最近的敵人。
+//
+// 素材是「面朝畫面下方」畫的，所以旋轉量 = 指向目標的角度 - PI/2。
+// 場上沒有敵人時，我方朝上（-PI）、敵方朝下（0），也就是雙方對峙的初始站姿。
+// 這是純函式，不改任何 state。
+function facingOf(g, u) {
+  const foes = aliveOf(g, u.tm === 'p' ? 'e' : 'p');
+  let best = null;
+  let bestD = Infinity;
+  for (const f of foes) {
+    const d = dist(u.x, u.y, f.x, f.y);
+    if (d < bestD) { bestD = d; best = f; }
+  }
+  if (!best) return u.tm === 'p' ? -Math.PI : 0;
+  return Math.atan2(best.y - u.y, best.x - u.x) - Math.PI / 2;
+}
+
 function drawUnits(ctx, g, cell, time) {
   ctx.font = `12px ${FONT}`;
   for (const u of g.battle.units) {
@@ -260,7 +294,10 @@ function drawUnits(ctx, g, cell, time) {
 
       const s = outerR * 2 * (1 + pulse * 0.012);
       ctx.save();
-      ctx.translate(cx, cy + recoil * r * 0.5);
+      ctx.translate(cx, cy);
+      ctx.rotate(facingOf(g, u));
+      // 後座力沿著朝向的反方向推，所以是負的（旋轉後 +Y 是朝向目標）
+      ctx.translate(0, -recoil * r * 0.6);
       ctx.drawImage(sprite, -s / 2, -s / 2, s, s);
       if (hurt) {
         // 受擊閃光：同一張圖用 lighter 疊上去提亮，不必另開 canvas 做 tint
@@ -460,11 +497,11 @@ function drawBanner(ctx, size, text) {
   ctx.fillText(text, PAD * 0.4 + 12, 23);
 }
 
-function drawToast(ctx, size, text) {
+function drawToast(ctx, size, text, color) {
   ctx.fillStyle = 'rgba(0,0,0,.55)';
   ctx.fillRect(0, size * 0.42, size, 56);
-  ctx.fillStyle = '#fff2d4';
-  ctx.font = `bold 28px ${FONT}`;
+  ctx.fillStyle = color || '#fff2d4';
+  ctx.font = `bold 30px ${FONT}`;
   ctx.textAlign = 'center';
   ctx.fillText(text, size / 2, size * 0.42 + 38);
   ctx.textAlign = 'start';
