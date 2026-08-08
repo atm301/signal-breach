@@ -13,9 +13,16 @@
     "check": "npm run sim && npm run test",
     "shots": "node tools/shots.mjs",
     "assets": "node tools/slice-sheets.mjs && node tools/make-og.mjs",
-    "assets:review": "node tools/asset-contact-sheet.mjs"
+    "assets:review": "node tools/asset-contact-sheet.mjs",
+    "check:subpath": "node tools/check-subpath.mjs",
+    "check:live": "node tools/check-live.mjs"
   },
   "devDependencies": {
     "playwright": "^1.49.0"
+  },
+  "homepage": "https://atm301.github.io/signal-breach/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/atm301/signal-breach.git"
   }
 }
