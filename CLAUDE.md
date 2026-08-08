@@ -23,7 +23,7 @@ npm run dev            # 本機開發 http://localhost:5178（ES module 不能�
 npm run sim            # 玩法評估器，跑 300 場，輸出勝率／深度分佈／回合長度
 npm run sim:max        # 模擬永久升級點滿的老玩家
 npm run sim:long       # 跑 2000 場，數字比較穩
-npm test               # Playwright 整合測試（20 項斷言 + console error 檢查）
+npm test               # Playwright 整合測試（27 項斷言 + console error 檢查）
 npm run check          # sim + test 一起跑
 npm run shots          # 各畫面截圖到 test-output/shots/，要人眼看
 npm run assets         # 重切素材表 + 重做 OG 圖
@@ -93,6 +93,8 @@ codex/images/items/*.png   大張素材表（純洋紅背景，3x3 或 2x3）
         ↓  npm run assets
 assets/units/*.webp        33 張單位（11 個單位 x 完好／受損／重創）
 assets/props/*.webp        6 張道具（掩體三階段、登陸點、碎片、補給箱）
+assets/icons/*.webp        8 個關卡節點圖示徽章
+assets/ui/*.webp           面板底板（slice:false 的整張圖，不切格）
 assets/manifest.json       載入器只會請求這份清單上的檔案
 ```
 
@@ -109,6 +111,7 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 | 固定網格硬切 | 素材貼到格線邊緣被切掉手腳 | 投影找分隔溝，在預期分界線附近取投影最小處當切線 |
 | 每格各自裁緊 | **單位被打之後反而變大**（受傷版剪影較小被放大） | 整張表共用一個裁切框尺寸 |
 | 洋紅去背用線性 alpha | 深色底上看得到淡淡的方形殘留 | 模型的背景不是精確 #FF00FF，上端要直接歸零 + 清掉 alpha < 40 |
+| **直接覆寫 alpha** | **所有素材鑲一圈不透明黑框**，深色底看不出來，單位一旋轉就露餡 | 共用框四周是畫布原本就透明的 rgba(0,0,0,0)，而 magentaness(0,0,0)=0 會被判成純素材。必須 `alpha = min(既有alpha, 去背alpha)`。切圖器現在會自動驗四角透明度 |
 
 ### 加新單位的步驟
 
@@ -152,6 +155,7 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 - `window.__game()` / `window.__meta()` — 直接拿到 state
 - `window.game_actions.*` — 所有 UI 動作（`startRun` / `goNode` / `toHub` ...）
 - `window.__debug.queueDraft(unitId)` / `window.__debug.finishRun(won)` — 把遊戲擺到特定狀態
+- `window.__audio()` / `window.__assets()` — 音效與素材載入狀態
 - `window.test_run_full_flow()` — 跑完一段核心流程
 
 ---
@@ -161,8 +165,8 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 - 地板與棋盤背景還是程式畫的漸層，沒有接素材（刻意的：換掉會傷害格線可讀性，優先度低）
 - `index.html` 裡的網址是 `tactics.atmarketing.tw` 佔位，部署前要確認
 - 手機觸控可用但未針對小螢幕重新排版面板
-- 音效是 Web Audio 合成，沒有音樂
-- 關卡樹節點還是中文字（戰／精／補／市），沒有接圖示素材
+- 尚未做戰鬥動畫（單位移動是瞬移，沒有補間）
+- BGM 是程序合成的環境音，沒有記憶點強的主旋律
 
 ---
 
