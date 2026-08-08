@@ -1,0 +1,128 @@
+{
+  "_meta": {
+    "note": "單位素材表。每一列 = 一個單位，每一欄 = 損傷程度（完好 / 受損 / 重創）。同一列必須是同一個單位只是損傷不同 —— 這是把三個狀態塞進同一次生成的唯一理由，分次生成必然漂移。切圖器見 tools/slice-sheets.mjs。",
+    "grid": "prompt 裡宣告的列數與欄數，必須和 tools/slice-sheets.mjs 的 SHEETS 設定一致"
+  },
+  "items": [
+    {
+      "id": "sheet-player-squad",
+      "name": "我方小隊素材表",
+      "rows": 3,
+      "cols": 3,
+      "cells": [
+        [
+          "vanguard-intact",
+          "vanguard-damaged",
+          "vanguard-critical"
+        ],
+        [
+          "sniper-intact",
+          "sniper-damaged",
+          "sniper-critical"
+        ],
+        [
+          "engineer-intact",
+          "engineer-damaged",
+          "engineer-critical"
+        ]
+      ],
+      "prompt": "A square 1:1 game asset sheet containing exactly 9 top-down military science-fiction infantry tokens, laid out in a clean 3 by 3 grid: 3 rows and 3 columns, with equal generous flat magenta gaps between every subject. No subject may touch, overlap or cast anything onto another. All 9 subjects are drawn at exactly the same scale, each one centred in its own invisible cell, each with a compact footprint that would fit inside a circle. Every figure is seen from STRAIGHT OVERHEAD: you see the top of the helmet, the tops of the shoulders and the weapon foreshortened flat against the body. Within each row the armour design, the colour scheme, the equipment and the silhouette are IDENTICAL - it is the exact same soldier three times - and ONLY the battle damage changes across the columns. Column 1 (left) = pristine, undamaged, fully intact armour. Column 2 (middle) = moderately damaged: armour plates dented and scorched black, one shoulder plate cracked open, a thin wisp of smoke. Column 3 (right) = critically damaged: armour shattered open, internal structural frame exposed, torn cabling hanging loose, sparks and glowing orange hot fractures. ROW 1 is a VANGUARD assault trooper: bulky heavy frontline exosuit, very thick angular shoulder pauldrons, a short stubby close-quarters weapon held across the chest, a narrow cyan-blue glowing visor slit on the helmet and thin cyan-blue trim strips along the shoulders. ROW 2 is a SNIPER marksman: slim lightweight low-profile recon suit, a long-barrelled precision rifle extending forward past the head, a ragged hooded camouflage cloak draped over the back, a single cyan-blue glowing optic lens. ROW 3 is an ENGINEER support trooper: medium-weight suit with a bulky rectangular backpack module and a short antenna, a compact carbine in one hand and a segmented mechanical tool arm on the other side, small cyan-blue indicator lights on the backpack",
+      "image": "items/sheet-player-squad.png",
+      "generated_at": "2026-08-03T16:42:33.556Z"
+    },
+    {
+      "id": "sheet-enemy-grunts",
+      "name": "敵方雜兵素材表",
+      "rows": 3,
+      "cols": 3,
+      "cells": [
+        [
+          "grunt-intact",
+          "grunt-damaged",
+          "grunt-critical"
+        ],
+        [
+          "marksman-intact",
+          "marksman-damaged",
+          "marksman-critical"
+        ],
+        [
+          "drone-intact",
+          "drone-damaged",
+          "drone-critical"
+        ]
+      ],
+      "prompt": "A square 1:1 game asset sheet containing exactly 9 top-down military science-fiction hostile units, laid out in a clean 3 by 3 grid: 3 rows and 3 columns, with equal generous flat magenta gaps between every subject. No subject may touch, overlap or cast anything onto another. All 9 subjects are drawn at exactly the same scale, each one centred in its own invisible cell, each with a compact footprint that would fit inside a circle. Every unit is seen from STRAIGHT OVERHEAD. Within each row the design, the colour scheme, the equipment and the silhouette are IDENTICAL - it is the exact same unit three times - and ONLY the battle damage changes across the columns. Column 1 (left) = pristine and fully intact. Column 2 (middle) = moderately damaged: plating dented and scorched black, one panel cracked open, a thin wisp of smoke. Column 3 (right) = critically damaged: hull shattered open, internal frame exposed, torn cabling hanging loose, sparks and glowing orange hot fractures. ROW 1 is a GRUNT assault trooper: standard-issue enemy infantry exosuit in dark gunmetal, medium shoulder plates, an assault rifle held across the chest, a single warm red glowing sensor eye on the helmet and thin warm red trim on the shoulders. ROW 2 is a MARKSMAN: lighter thinner enemy suit, a longer barrelled rifle extending forward, a slim targeting antenna rising from one shoulder, a warm red glowing optic lens. ROW 3 is a HUNTER-KILLER DRONE and is NOT humanoid: a compact quadrotor combat drone seen from above, four ducted rotor housings arranged in a square around a central armoured chassis, a small underslung gun pod pointing forward, a warm red glowing sensor ring on top of the chassis",
+      "image": "items/sheet-enemy-grunts.png",
+      "generated_at": "2026-08-03T16:44:51.935Z"
+    },
+    {
+      "id": "sheet-enemy-elites",
+      "name": "敵方精英素材表",
+      "rows": 3,
+      "cols": 3,
+      "cells": [
+        [
+          "artillery-intact",
+          "artillery-damaged",
+          "artillery-critical"
+        ],
+        [
+          "brute-intact",
+          "brute-damaged",
+          "brute-critical"
+        ],
+        [
+          "commander-intact",
+          "commander-damaged",
+          "commander-critical"
+        ]
+      ],
+      "prompt": "A square 1:1 game asset sheet containing exactly 9 top-down military science-fiction elite hostile units, laid out in a clean 3 by 3 grid: 3 rows and 3 columns, with equal generous flat magenta gaps between every subject. No subject may touch, overlap or cast anything onto another. All 9 subjects are drawn at exactly the same scale, each one centred in its own invisible cell, each with a compact footprint that would fit inside a circle. Every unit is seen from STRAIGHT OVERHEAD. Within each row the design, the colour scheme, the equipment and the silhouette are IDENTICAL - it is the exact same unit three times - and ONLY the battle damage changes across the columns. Column 1 (left) = pristine and fully intact. Column 2 (middle) = moderately damaged: plating dented and scorched black, one panel cracked open, a thin wisp of smoke. Column 3 (right) = critically damaged: hull shattered open, internal frame exposed, torn cabling hanging loose, sparks and glowing orange hot fractures. ROW 1 is a MORTAR CREW weapon emplacement and is NOT a single soldier: a squat armoured mortar tube angled upward on a heavy three-legged tripod base, a stack of shells and an ammunition crate beside it, a small warm red targeting module clamped to the tube. ROW 2 is a BRUTE heavy trooper: massively armoured bruiser exosuit, enormous slab-like shoulder and chest plates, a heavy blast shield strapped to one forearm and a short heavy weapon in the other hand, thick reinforced leg armour, warm red glowing vents along the back. ROW 3 is a COMMANDER elite officer: tall imposing armoured officer suit with a crested helmet and a short tattered command cape falling over the shoulders, an ornate rifle held diagonally, shoulder-mounted antenna array, deep crimson red glowing visor and crimson trim, clearly higher rank than a normal trooper",
+      "image": "items/sheet-enemy-elites.png",
+      "generated_at": "2026-08-03T16:47:09.270Z"
+    },
+    {
+      "id": "sheet-boss",
+      "name": "頭目素材表",
+      "rows": 2,
+      "cols": 3,
+      "cells": [
+        [
+          "warden-intact",
+          "warden-damaged",
+          "warden-critical"
+        ],
+        [
+          "hunter-intact",
+          "hunter-damaged",
+          "hunter-critical"
+        ]
+      ],
+      "prompt": "A wide landscape 3:2 game asset sheet containing exactly 6 top-down military science-fiction boss units, laid out in a clean grid of 2 rows and 3 columns, with equal generous flat magenta gaps between every subject. No subject may touch, overlap or cast anything onto another. All 6 subjects are drawn at exactly the same scale, each one centred in its own invisible cell, each with a compact footprint that would fit inside a circle. Every unit is seen from STRAIGHT OVERHEAD. Within each row the design, the colour scheme, the equipment and the silhouette are IDENTICAL - it is the exact same unit three times - and ONLY the battle damage changes across the columns. Column 1 (left) = pristine and fully intact. Column 2 (middle) = moderately damaged: plating dented and scorched black, one panel cracked open, a thin wisp of smoke. Column 3 (right) = critically damaged: hull shattered open, internal frame exposed, torn cabling hanging loose, sparks and glowing orange hot fractures. ROW 1 is the WARDEN, a fortress guardian walker and NOT a soldier: a heavy armoured turret platform standing on four short splayed mechanical legs, a long twin-barrelled cannon assembly on top, thick layered armour skirts, deep crimson red glowing sensor band around the turret housing. ROW 2 is the HUNTER, an elite marksman boss: a tall lean predatory armoured figure in a long torn cloak, an extremely long precision rail rifle extending well forward, a multi-lens optic cluster on the helmet, bladed forearm guards, deep crimson red glowing lenses and crimson trim",
+      "image": "items/sheet-boss.png",
+      "generated_at": "2026-08-03T16:49:12.025Z"
+    },
+    {
+      "id": "sheet-terrain",
+      "name": "地形與掩體素材表",
+      "rows": 2,
+      "cols": 3,
+      "cells": [
+        [
+          "cover-intact",
+          "cover-damaged",
+          "cover-destroyed"
+        ],
+        [
+          "landing-pad",
+          "debris",
+          "supply-crate"
+        ]
+      ],
+      "prompt": "A wide landscape 3:2 game asset sheet containing exactly 6 top-down military science-fiction battlefield props, laid out in a clean grid of 2 rows and 3 columns, with equal generous flat magenta gaps between every object. No object may touch, overlap or cast anything onto another. All 6 objects are seen from STRAIGHT OVERHEAD and drawn at the same scale, each centred in its own invisible cell, each with a roughly square footprint. ROW 1 is the SAME barricade three times, identical design and colour, only the damage changes: cell 1 is a pristine heavy armoured barricade block, a rectangular gunmetal cover barrier with visible bolt heads, panel seams and a chipped yellow-black hazard stripe along one edge; cell 2 is the same barricade moderately damaged with dents, scorch marks, a cracked corner and chipped paint; cell 3 is the same barricade blown apart into a low pile of twisted buckled plates and rubble with glowing orange embers. ROW 2 contains three different objects: cell 1 is a circular metal landing pad marker set into the ground, concentric rings with worn chevron arrows pointing inward and dim cyan-blue guide lights; cell 2 is a scatter of battlefield debris, broken armour fragments, spent shell casings and torn cabling; cell 3 is a sealed military supply crate with reinforced corners, latches and a small green status light",
+      "image": "items/sheet-terrain.png",
+      "generated_at": "2026-08-03T16:51:03.829Z"
+    }
+  ]
+}

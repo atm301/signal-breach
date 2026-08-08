@@ -1,0 +1,18 @@
+{
+  "_meta": {
+    "note": "借用 wrapper 的 panel 機制來跑「不要洋紅背景」的圖。單位素材表要去背所以背景是純洋紅，但 OG 分享圖是完整插畫，需要另一套 style，_meta.style_override 就是 wrapper 提供的逃生口。",
+    "style_override": "Style: grounded military science-fiction key art, cinematic and atmospheric. Strict top-down orthographic view of a battlefield seen from directly overhead. Matte tactical armour, brushed gunmetal, carbon fibre and worn steel with panel lines and weathering. Muted desaturated palette built on deep navy #0C151C and gunmetal #3A4750, with restrained cyan-blue #5DB6FF and warm red #FF8678 emissive accents. Dramatic single cool key light from above, volumetric dust and smoke haze, soft ambient occlusion, subtle film grain. Sharp focus, high contrast, readable silhouettes. No text, no letters, no numbers, no labels, no captions, no watermark, no signature, no logo, no user interface elements, no frame or border."
+  },
+  "og": {
+    "panels": [
+      {
+        "id": "og-signal-breach",
+        "panel_no": 1,
+        "scene": "OG 分享圖底圖（1200x630 用，文字之後用 Playwright 疊上去）",
+        "prompt": "Wide cinematic 3:2 landscape key art for a turn-based tactics roguelike. Seen from straight overhead: a 5 by 5 grid of scorched metal deck plating on a derelict space station floor, faint glowing cyan grid lines etched into the plates. Three cyan-blue accented allied exosuit troopers hold the lower half of the grid behind heavy armoured barricades. Four warm-red accented hostile troopers and one quadrotor drone advance from the upper half. Thin light beams cross the middle of the board mid-firefight, with impact sparks, drifting smoke and floating embers. One barricade in the centre is blown apart into twisted plates. The lower right area of the frame is intentionally darker and emptier so that a title can be placed there later",
+        "image": "comics/og/og-signal-breach.png",
+        "generated_at": "2026-08-03T16:53:09.673Z"
+      }
+    ]
+  }
+}

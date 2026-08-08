@@ -1,0 +1,21 @@
+{
+  "name": "signal-breach",
+  "version": "0.2.0",
+  "description": "Signal Breach 訊號突破 — 5x5 科幻回合制戰棋 Roguelike（純前端，可靜態部署）",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "node serve.mjs",
+    "sim": "node tools/simulate.mjs",
+    "sim:max": "node tools/simulate.mjs --meta=max",
+    "sim:long": "node tools/simulate.mjs --runs=2000",
+    "test": "node tests/full-flow-test.mjs",
+    "check": "npm run sim && npm run test",
+    "shots": "node tools/shots.mjs",
+    "assets": "node tools/slice-sheets.mjs && node tools/make-og.mjs",
+    "assets:review": "node tools/asset-contact-sheet.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Signal Breach 訊號突破 — 科幻回合制戰棋 Roguelike</title>
+  <meta name="description" content="5x5 網格的科幻回合制戰棋 Roguelike。隨機分岔路線、程序生成敵人、升級抽卡與跨局永久升級。每一次出擊都不一樣。">
+  <meta name="theme-color" content="#0c151c">
+  <link rel="canonical" href="https://atm301.github.io/signal-breach/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Signal Breach 訊號突破">
+  <meta property="og:description" content="科幻回合制戰棋 Roguelike。隨機路線、程序生成敵人、跨局永久升級。">
+  <meta property="og:url" content="https://atm301.github.io/signal-breach/">
+  <meta property="og:image" content="https://atm301.github.io/signal-breach/assets/og.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Signal Breach 訊號突破">
+  <meta name="twitter:description" content="科幻回合制戰棋 Roguelike。隨機路線、程序生成敵人、跨局永久升級。">
+  <meta name="twitter:image" content="https://atm301.github.io/signal-breach/assets/og.jpg">
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230c151c'/><circle cx='16' cy='16' r='8' fill='none' stroke='%235db6ff' stroke-width='3'/></svg>">
+  <link rel="stylesheet" href="styles.css">
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-RDJD1YVHR7"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-RDJD1YVHR7');
+  </script>
+  <script>
+    !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+    n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;
+    n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
+    t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,
+    document,'script','https://connect.facebook.net/en_US/fbevents.js');
+    fbq('init','4979950938896019');fbq('track','PageView');
+  </script>
+  <noscript><img height="1" width="1" style="display:none"
+    src="https://www.facebook.com/tr?id=4979950938896019&ev=PageView&noscript=1" alt=""></noscript>
+</head>
+<body>
+  <main class="wrap">
+    <section class="stage card">
+      <canvas id="game" width="840" height="840" aria-label="戰術棋盤與關卡路線圖"></canvas>
+      <div class="hud" id="hud"></div>
+    </section>
+
+    <aside class="panel card">
+      <h1>Signal Breach<span>訊號突破</span></h1>
+      <div id="panel"></div>
+    </aside>
+  </main>
+
+  <noscript>
+    <p style="padding:16px;color:#d5e4eb">這個遊戲需要 JavaScript 才能執行。</p>
+  </noscript>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

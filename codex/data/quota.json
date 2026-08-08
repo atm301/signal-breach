@@ -1,0 +1,64 @@
+{
+  "_meta": {
+    "description": "每日生成額度追蹤",
+    "daily_limit": 20,
+    "min_interval_seconds": 30,
+    "note": "codex 生圖吃的是 ChatGPT Plus 的 rate limit（5 小時滾動窗口約 15-80 則訊息），不是固定張數。20/天 安全；同一週別再跑別的重活。跨日 reset 由 codex-generate 負責。"
+  },
+  "history": [],
+  "today": {
+    "date": "2026-08-04",
+    "generated": 6,
+    "limit": 20,
+    "sessions": [
+      {
+        "id": "sheet-player-squad",
+        "kind": "item",
+        "timestamp": "2026-08-03T16:42:33.558Z",
+        "elapsed_seconds": 123.5,
+        "codex_session": "019fc87f-a86a-7861-955a-34785b604472",
+        "image": "items/sheet-player-squad.png"
+      },
+      {
+        "id": "sheet-enemy-grunts",
+        "kind": "item",
+        "timestamp": "2026-08-03T16:44:51.941Z",
+        "elapsed_seconds": 95.6,
+        "codex_session": "019fc882-1ff3-78b0-9060-6224a6ea08a2",
+        "image": "items/sheet-enemy-grunts.png"
+      },
+      {
+        "id": "sheet-enemy-elites",
+        "kind": "item",
+        "timestamp": "2026-08-03T16:47:09.272Z",
+        "elapsed_seconds": 102.1,
+        "codex_session": "019fc884-2103-7110-b1e7-25b784591c15",
+        "image": "items/sheet-enemy-elites.png"
+      },
+      {
+        "id": "sheet-boss",
+        "kind": "item",
+        "timestamp": "2026-08-03T16:49:12.026Z",
+        "elapsed_seconds": 87.5,
+        "codex_session": "019fc886-3acd-7740-837a-2c2d97395622",
+        "image": "items/sheet-boss.png"
+      },
+      {
+        "id": "sheet-terrain",
+        "kind": "item",
+        "timestamp": "2026-08-03T16:51:03.830Z",
+        "elapsed_seconds": 76.6,
+        "codex_session": "019fc888-182a-72d3-8e6a-f4104ccade28",
+        "image": "items/sheet-terrain.png"
+      },
+      {
+        "id": "og-signal-breach",
+        "kind": "panel",
+        "timestamp": "2026-08-03T16:53:09.673Z",
+        "elapsed_seconds": 90.7,
+        "codex_session": "019fc889-cf11-7161-b7f5-c20ba0874893",
+        "image": "comics/og/og-signal-breach.png"
+      }
+    ]
+  }
+}
