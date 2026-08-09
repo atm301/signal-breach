@@ -10,8 +10,12 @@ import {
 } from './engine.js';
 import { loadMeta, saveMeta, buyUpgrade, recordRun, resetMeta } from './meta.js';
 import { loadAssets, assetCount } from './assets.js';
-import { ensureAudio, playSfx, setMusicMode, toggleMusic, toggleSfx, audioState } from './audio.js';
-import { renderBattle, renderMap, renderIdle, pickBoardTile, pickMapNode } from './render.js';
+import {
+  ensureAudio, playSfx, setMusicMode, toggleMusic, toggleSfx, audioState,
+  currentTrack, shuffleTrack,
+} from './audio.js';
+import { saveRun, loadRun, peekRun, clearRun } from './save.js';
+import { renderBattle, renderMap, renderIdle, renderTitle, pickBoardTile, pickMapNode } from './render.js';
 import { createUI, hudHtml } from './ui.js';
 import { dailySeed } from './rng.js';
 
@@ -38,7 +42,7 @@ function musicModeFor(game) {
   if (game.screen === 'battle' || game.screen === 'victory') {
     return game.battle?.nodeType === 'boss' ? 'boss' : 'battle';
   }
-  if (game.screen === 'hub') return 'hub';
+  if (game.screen === 'title' || game.screen === 'credits' || game.screen === 'hub') return 'hub';
   if (game.screen === 'result') return 'result';
   return 'map';
 }
@@ -54,20 +58,28 @@ for (const ev of ['pointerdown', 'keydown', 'touchstart']) {
 
 // ---------------------------------------------------------------- run 生命週期
 
+// ⚠️ 這裡刻意不呼叫 clearRun()。
+// 開機時也會叫一次 newRun() 當佔位（讓 g 不是 null），
+// 如果在這裡清檔，等於每次重新載入頁面都會把存檔刪掉，讀檔永遠讀不到。
+// 清檔放在真正「開新出擊」的 action 裡。
 function newRun(seed) {
   g = createGame({ seed, meta });
   fxList = [];
   aiAcc = 0;
   resultRecorded = false;
+  lastSaveSig = '';
+  refreshTitleSave();
   ui.invalidate();
 }
 
 function toHub(abandon = false) {
-  if (abandon && g && g.screen !== 'hub' && g.screen !== 'result') {
+  if (abandon && g && !['hub', 'result', 'title', 'credits'].includes(g.screen)) {
     finishRun(g, false); // 中途放棄仍然結算碎片，避免「打不過就重整頁面」變成最優解
     commitResult();
   }
   if (!g) newRun();
+  clearRun();
+  refreshTitleSave();
   g.screen = 'hub';
   ui.invalidate();
 }
@@ -77,6 +89,27 @@ function commitResult() {
   resultRecorded = true;
   recordRun(meta, g.result);
   saveMeta(meta);
+  clearRun(); // run 結束了，存檔沒有意義
+  refreshTitleSave();
+}
+
+// ---------------------------------------------------------------- 存檔
+
+let titleSave = null;
+let lastSaveSig = '';
+
+function refreshTitleSave() {
+  titleSave = peekRun();
+  ui.invalidate();
+}
+
+// 只在「狀態真的推進了」的時候寫檔，不要每一幀都寫
+function autoSave() {
+  if (!g || ['title', 'credits', 'hub', 'result'].includes(g.screen)) return;
+  const sig = `${g.screen}|${g.currentNodeId}|${g.battle?.turn ?? 0}|${g.battle?.phase ?? '-'}|${g.squad.map((u) => u.hp).join(',')}`;
+  if (sig === lastSaveSig) return;
+  lastSaveSig = sig;
+  saveRun(g);
 }
 
 // ---------------------------------------------------------------- 動作表（UI 與快捷鍵共用）
@@ -84,13 +117,41 @@ function commitResult() {
 const actions = {
   music() { toggleMusic(); ui.invalidate(); },
   sfx() { toggleSfx(); playSfx('click'); ui.invalidate(); },
+  shuffle() { shuffleTrack(); ui.invalidate(); },
   toHub() { toHub(true); },
 
-  startRun() { newRun(); },
-  startDaily() { newRun(dailySeed()); },
+  // 開場畫面
+  play() {
+    if (!g) newRun();
+    g.screen = 'hub';
+    ui.invalidate();
+  },
+  credits() { g.screen = 'credits'; ui.invalidate(); },
+  titleBack() { g.screen = 'title'; refreshTitleSave(); },
+  resumeRun() {
+    const loaded = loadRun(meta);
+    if (!loaded) { refreshTitleSave(); return; }
+    g = loaded;
+    fxList = [];
+    aiAcc = 0;
+    resultRecorded = false;
+    lastSaveSig = '';
+    playSfx('ui', 700);
+    ui.invalidate();
+  },
+  deleteSave() {
+    if (!window.confirm('確定要刪除這筆出擊存檔嗎？這場的進度會消失。')) return;
+    clearRun();
+    refreshTitleSave();
+  },
+
+  // 開新出擊才清掉舊存檔
+  startRun() { clearRun(); newRun(); },
+  startDaily() { clearRun(); newRun(dailySeed()); },
   startSeed() {
     const input = document.getElementById('seedInput');
     const value = (input?.value || '').trim();
+    clearRun();
     newRun(value || undefined);
   },
 
@@ -250,7 +311,9 @@ function update(dt) {
 
 function draw(time) {
   const size = canvasSize();
-  if ((g.screen === 'battle' || g.screen === 'victory') && g.battle) renderBattle(ctx, g, size, time, fxList);
+  if (g.screen === 'title' || g.screen === 'credits') {
+    renderTitle(ctx, size, time, { mode: g.screen, audioStarted: audioState().started });
+  } else if ((g.screen === 'battle' || g.screen === 'victory') && g.battle) renderBattle(ctx, g, size, time, fxList);
   else if (g.screen === 'hub') renderIdle(ctx, g, size, '作戰基地');
   else if (g.screen === 'result') renderIdle(ctx, g, size, g.result?.won ? '出擊成功' : '出擊失敗');
   else renderMap(ctx, g, size, time, hoverNodeId);
@@ -262,7 +325,12 @@ function frame(now) {
   update(dt);
   draw(now);
   setMusicMode(musicModeFor(g));
-  ui.render(g, meta, audioState());
+  autoSave();
+  ui.render(g, meta, {
+    ...audioState(),
+    track: currentTrack()?.name ?? null,
+    save: g.screen === 'title' ? titleSave : null,
+  });
   hudRoot.innerHTML = hudHtml(g);
   requestAnimationFrame(frame);
 }
@@ -273,9 +341,9 @@ const params = new URLSearchParams(location.search);
 const urlSeed = params.get('seed');
 const wantDaily = params.get('daily') === '1';
 
-if (urlSeed) newRun(urlSeed);
-else if (wantDaily) newRun(dailySeed());
-else { newRun(); g.screen = 'hub'; }
+if (urlSeed) { clearRun(); newRun(urlSeed); }
+else if (wantDaily) { clearRun(); newRun(dailySeed()); }
+else { newRun(); g.screen = 'title'; refreshTitleSave(); }
 
 resizeCanvas();
 requestAnimationFrame(frame);
@@ -295,6 +363,9 @@ window.__debug = {
   queueDraft: (unitId, source = 'levelup') => queueDraft(g, unitId, source),
   finishRun: (won) => finishRun(g, won),
   tapBoard: (x, y) => tapBoard(g, x, y),
+  setMusicMode: (m) => setMusicMode(m),
+  refreshTitleSave: () => refreshTitleSave(),
+  playSfx: (k, f) => playSfx(k, f),
 };
 window.__assets = () => assetCount();
 window.__audio = () => audioState();

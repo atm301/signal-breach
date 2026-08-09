@@ -31,6 +31,18 @@ const panelHasContent = await page.evaluate(() => document.getElementById('panel
 await page.waitForFunction(() => window.__assets && window.__assets().ready, null, { timeout: 15000 }).catch(() => {});
 const assets = await page.evaluate(() => window.__assets());
 
+// 1b2) 開場畫面要能走到大廳，作者的話要能開能回
+const titleFlow = await page.evaluate(() => {
+  const seen = {};
+  window.game_actions.credits();
+  seen.credits = window.__game().screen === 'credits';
+  window.game_actions.titleBack();
+  seen.back = window.__game().screen === 'title';
+  window.game_actions.play();
+  seen.hub = window.__game().screen === 'hub';
+  return seen;
+});
+
 // 1c) 音效系統：瀏覽器規定要有使用者手勢才能出聲，所以先點一下再驗。
 //     不驗的話「沒聲音」只會在真人玩的時候才發現。
 await page.mouse.click(5, 5);
@@ -111,16 +123,73 @@ const cleanupOnFinish = await page.evaluate(() => {
   };
 });
 
+// 7) 存檔往返：存檔 → 真的重新載入頁面 → 讀檔 → 狀態必須一模一樣。
+//    壞掉的存檔比沒有存檔更糟，這條一定要驗到「重新載入」那一步，
+//    只在同一個 page 裡 serialize 再 deserialize 是驗不出東西的。
+const saveSig = (g) => JSON.stringify({
+  seed: g.seed,
+  node: g.currentNodeId,
+  screen: g.screen,
+  credits: g.credits,
+  depth: g.stats.depth,
+  kills: g.stats.kills,
+  squad: g.squad.map((u) => [u.id, u.hp, u.mhp, u.lv, u.xp, u.atk, u.rg, u.map, u.sp, u.path]),
+  cover: g.battle ? [...g.battle.cover].sort() : null,
+  enemies: g.battle ? g.battle.units.filter((u) => u.tm === 'e').map((u) => [u.key, u.hp, u.x, u.y]) : null,
+  map: Object.values(g.map.nodes).map((n) => `${n.id}${n.type}${n.visited ? 1 : 0}`),
+});
+
+const before = await page.evaluate(({ src }) => {
+  // eslint-disable-next-line no-new-func
+  const sig = new Function(`return (${src})`)();
+  window.game_actions.startRun();
+  const g = window.__game();
+  // 走兩步，讓存檔不是「剛開始」那種沒內容的狀態
+  window.game_actions.goNode(g.map.nodes[g.currentNodeId].next[0]);
+  if (g.screen === 'victory') window.game_actions.victoryClose();
+  if (g.pending.draft) window.game_actions.draft(g.pending.draft.cards[0].id);
+  return { sig: sig(g), screen: g.screen };
+}, { src: saveSig.toString() });
+
+// 等自動存檔跑過一幀
+await page.waitForTimeout(300);
+const savedRaw = await page.evaluate(() => localStorage.getItem('sft_run_v1'));
+
+// 真的重新載入
+await page.reload({ waitUntil: 'domcontentloaded' });
+await page.waitForFunction(() => typeof window.__game === 'function', null, { timeout: 10000 });
+await page.waitForFunction(() => window.__assets && window.__assets().ready, null, { timeout: 15000 }).catch(() => {});
+
+const afterReload = await page.evaluate(({ src }) => {
+  // eslint-disable-next-line no-new-func
+  const sig = new Function(`return (${src})`)();
+  const onTitle = window.__game().screen === 'title';
+  window.game_actions.resumeRun();
+  const g = window.__game();
+  return { onTitle, sig: sig(g), screen: g.screen };
+}, { src: saveSig.toString() });
+
+const saveRoundTrip = {
+  wroteFile: !!savedRaw && savedRaw.length > 200,
+  bootsToTitleAfterReload: afterReload.onTitle,
+  stateIdentical: before.sig === afterReload.sig,
+  screenRestored: before.screen === afterReload.screen,
+};
+
 await page.screenshot({ path: path.join(outDir, 'full-flow.png'), fullPage: false });
 
 const assertions = {
-  bootsToHub: bootState.screen === 'hub',
+  bootsToTitle: bootState.screen === 'title',
   panelRendered: panelHasContent,
   unitSpritesLoaded: assets.units === 33, // 11 個單位 x 3 個損傷階段
   propSpritesLoaded: assets.props === 6,
   iconSpritesLoaded: assets.icons === 8,
-  uiSpritesLoaded: assets.ui === 1,
+  uiSpritesLoaded: assets.ui === 2, // panel-backdrop + title-bg
+  titleOpensCredits: titleFlow.credits,
+  titleReturns: titleFlow.back,
+  titleEntersHub: titleFlow.hub,
   audioContextStarted: audio.started === true,
+  musicAudible: audio.level > 0.004,
   musicPlaying: audio.mode !== null,
   musicSwitchesWithScreen: audioInRun.mode === 'map',
   flowCompleted: !!flow.ok,
@@ -140,6 +209,10 @@ const assertions = {
   draftQueuedForTest: cleanupOnFinish.hadDraft,
   pendingClearedOnRunEnd: cleanupOnFinish.draftCleared,
   reachesResultScreen: cleanupOnFinish.onResultScreen,
+  saveFileWritten: saveRoundTrip.wroteFile,
+  saveBootsToTitle: saveRoundTrip.bootsToTitleAfterReload,
+  saveStateIdenticalAfterReload: saveRoundTrip.stateIdentical,
+  saveScreenRestored: saveRoundTrip.screenRestored,
   noConsoleErrors: errors.length === 0,
 };
 
@@ -147,7 +220,7 @@ const pass = Object.values(assertions).every(Boolean);
 
 fs.writeFileSync(
   path.join(outDir, 'result.json'),
-  JSON.stringify({ pass, assertions, flow, mapOk, deterministic, errors }, null, 2)
+  JSON.stringify({ pass, assertions, flow, mapOk, deterministic, saveRoundTrip, errors }, null, 2)
 );
 fs.writeFileSync(path.join(outDir, 'state.json'), JSON.stringify(afterFlow, null, 2));
 

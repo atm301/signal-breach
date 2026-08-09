@@ -3,7 +3,7 @@
 
 import { GRID, FLOORS, NODE_TYPES } from './data.js';
 import { key, dist, reachableTiles, aliveOf, unitById, availableNodes } from './engine.js';
-import { unitSprite, coverSprite, nodeIcon } from './assets.js';
+import { unitSprite, coverSprite, nodeIcon, uiSprite } from './assets.js';
 
 const PAD = 56;
 export const FONT = '"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif';
@@ -504,6 +504,82 @@ function drawToast(ctx, size, text, color) {
   ctx.font = `bold 30px ${FONT}`;
   ctx.textAlign = 'center';
   ctx.fillText(text, size / 2, size * 0.42 + 38);
+  ctx.textAlign = 'start';
+}
+
+// 開場畫面與作者的話：用 key art 當底，疊暗幕與標題
+export function renderTitle(ctx, size, time, opts = {}) {
+  const art = uiSprite('title-bg');
+  ctx.clearRect(0, 0, size, size);
+
+  if (art) {
+    ctx.drawImage(art, 0, 0, size, size);
+  } else {
+    const grad = ctx.createRadialGradient(size * 0.5, size * 0.4, 10, size * 0.5, size * 0.5, size * 0.8);
+    grad.addColorStop(0, '#1d3242');
+    grad.addColorStop(1, '#0b151c');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+  }
+
+  // 暗幕：上下重、中間輕，讓標題有地方站
+  const scrim = ctx.createLinearGradient(0, 0, 0, size);
+  scrim.addColorStop(0, 'rgba(12,21,28,.92)');
+  scrim.addColorStop(0.42, 'rgba(12,21,28,.35)');
+  scrim.addColorStop(0.78, 'rgba(12,21,28,.72)');
+  scrim.addColorStop(1, 'rgba(12,21,28,.96)');
+  ctx.fillStyle = scrim;
+  ctx.fillRect(0, 0, size, size);
+
+  ctx.textAlign = 'center';
+
+  if (opts.mode === 'credits') {
+    ctx.fillStyle = 'rgba(213,228,235,.95)';
+    ctx.font = `bold ${Math.round(size * 0.058)}px ${FONT}`;
+    ctx.fillText('作者的話', size / 2, size * 0.5);
+    ctx.fillStyle = 'rgba(137,160,174,.9)';
+    ctx.font = `${Math.round(size * 0.02)}px ${FONT}`;
+    ctx.fillText('AUTHOR NOTE', size / 2, size * 0.55);
+    ctx.textAlign = 'start';
+    return;
+  }
+
+  // 標題
+  const pulse = 0.5 + Math.sin(time / 900) * 0.5;
+  ctx.fillStyle = 'rgba(113,217,147,.9)';
+  ctx.font = `bold ${Math.round(size * 0.019)}px ${FONT}`;
+  ctx.fillText('T U R N - B A S E D   T A C T I C S', size / 2, size * 0.30);
+
+  ctx.save();
+  ctx.shadowBlur = 30;
+  ctx.shadowColor = 'rgba(93,182,255,.5)';
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `800 ${Math.round(size * 0.105)}px ${FONT}`;
+  ctx.fillText('SIGNAL', size / 2, size * 0.42);
+  ctx.fillText('BREACH', size / 2, size * 0.53);
+  ctx.restore();
+
+  ctx.fillStyle = '#5db6ff';
+  ctx.font = `bold ${Math.round(size * 0.042)}px ${FONT}`;
+  ctx.fillText('訊 號 突 破', size / 2, size * 0.615);
+
+  ctx.strokeStyle = 'rgba(93,182,255,.7)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(size * 0.36, size * 0.655);
+  ctx.lineTo(size * 0.64, size * 0.655);
+  ctx.stroke();
+
+  ctx.fillStyle = 'rgba(168,191,204,.9)';
+  ctx.font = `${Math.round(size * 0.022)}px ${FONT}`;
+  ctx.fillText('5x5 科幻回合制戰棋 Roguelike', size / 2, size * 0.70);
+
+  if (!opts.audioStarted) {
+    ctx.fillStyle = `rgba(255,217,128,${0.45 + pulse * 0.5})`;
+    ctx.font = `${Math.round(size * 0.021)}px ${FONT}`;
+    ctx.fillText('點擊任意處以啟動音效與音樂', size / 2, size * 0.90);
+  }
+
   ctx.textAlign = 'start';
 }
 

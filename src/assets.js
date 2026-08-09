@@ -67,6 +67,10 @@ export function unitSprite(unit) {
   return state.units.get(`${unit.key}-intact`) ?? null;
 }
 
+export function uiSprite(name) {
+  return state.ui.get(name) ?? null;
+}
+
 export function propSprite(name) {
   return state.props.get(name) ?? null;
 }

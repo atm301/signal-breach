@@ -71,3 +71,33 @@ await browser.close();
 
 const kb = (fs.statSync(OUT).size / 1024).toFixed(0);
 console.log(`OG 圖：${path.relative(ROOT, OUT)}  ${W}x${H}  ${kb} KB`);
+
+// 開場畫面的背景，重用同一張底圖轉成正方形 WebP（canvas 是 1:1）。
+// 不用另外叫 codex 生一張，省一次配額而且視覺一致。
+{
+  const TITLE_OUT = path.join(ROOT, 'assets', 'ui', 'title-bg.webp');
+  const b2 = chromium ? null : null;
+  void b2;
+  const browser2 = await chromium.launch({ headless: true });
+  const page2 = await browser2.newPage({ viewport: { width: 900, height: 900 } });
+  await page2.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>
+    *{margin:0;padding:0}
+    body{width:900px;height:900px;overflow:hidden;background:#0c151c}
+    img{width:100%;height:100%;object-fit:cover;object-position:center 42%}
+  </style></head><body><img src="data:image/png;base64,${b64}"></body></html>`);
+  await page2.waitForTimeout(400);
+  const buf = await page2.screenshot({ type: 'png', clip: { x: 0, y: 0, width: 900, height: 900 } });
+  const webp = await page2.evaluate(async (b64png) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${b64png}`;
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = 900; c.height = 900;
+    c.getContext('2d').drawImage(img, 0, 0);
+    return c.toDataURL('image/webp', 0.86);
+  }, buf.toString('base64'));
+  await browser2.close();
+  fs.mkdirSync(path.dirname(TITLE_OUT), { recursive: true });
+  fs.writeFileSync(TITLE_OUT, Buffer.from(webp.split(',')[1], 'base64'));
+  console.log(`開場背景：${path.relative(ROOT, TITLE_OUT)}  900x900  ${(fs.statSync(TITLE_OUT).size / 1024).toFixed(0)} KB`);
+}

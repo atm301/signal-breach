@@ -8,6 +8,8 @@
 // 直接用 setTimeout 觸發會因為主執行緒卡頓而抖動。
 
 const STORAGE_KEY = 'sft_audio_v1';
+const MUSIC_GAIN = 0.30;
+const SFX_GAIN = 0.55;
 
 const state = {
   ctx: null,
@@ -22,6 +24,9 @@ const state = {
   step: 0,
   bar: 0,
   noiseBuffer: null,
+  musicAnalyser: null,
+  track: null,
+  drone: null,
 };
 
 // ---------------------------------------------------------------- 設定持久化
@@ -64,11 +69,18 @@ export function ensureAudio() {
   state.master.connect(ctx.destination);
 
   state.musicBus = ctx.createGain();
-  state.musicBus.gain.value = state.musicOn ? 0.22 : 0;
+  state.musicBus.gain.value = state.musicOn ? MUSIC_GAIN : 0;
   state.musicBus.connect(state.master);
 
+  // 掛一個分析器在音樂匯流排上，讓測試可以真的量到「有沒有出聲」。
+  // 只檢查 state.mode !== null 是不夠的 —— 沒有 AudioContext 時 mode 一樣會被設定，
+  // 之前就是這樣讓「開場沒有 BGM」躲過測試的。
+  state.musicAnalyser = ctx.createAnalyser();
+  state.musicAnalyser.fftSize = 2048;
+  state.musicBus.connect(state.musicAnalyser);
+
   state.sfxBus = ctx.createGain();
-  state.sfxBus.gain.value = state.sfxOn ? 0.55 : 0;
+  state.sfxBus.gain.value = state.sfxOn ? SFX_GAIN : 0;
   state.sfxBus.connect(state.master);
 
   // 白噪音緩衝，打擊樂與爆炸音用
@@ -216,16 +228,65 @@ export function playSfx(kind, freq) {
 
 // ---------------------------------------------------------------- 背景音樂
 
-// A 小調，四小節一循環。根音走 Am - F - Dm - G。
-const ROOTS = [45, 41, 38, 43];
-const PENTATONIC = [0, 3, 5, 7, 10]; // 小調五聲，隨便挑都不會刺耳
+// 五首曲子，開始播放時隨機挑一首，進戰鬥時再重挑一次，
+// 所以同一場遊戲不會一直聽到同一段旋律。
+//
+// 每首只差在「和弦走向 + 音階 + 音色」，共用同一套排程器，
+// 這樣加新曲子只要往這個陣列多推一筆。
+const TRACKS = [
+  {
+    id: 'silent-orbit',
+    name: '靜默軌道',
+    roots: [45, 41, 38, 43], // Am - F - Dm - G
+    scale: [0, 3, 5, 7, 10], // 小調五聲
+    padWave: 'sawtooth',
+    arpWave: 'square',
+    tone: 1.0,
+  },
+  {
+    id: 'rusted-deck',
+    name: '鏽蝕甲板',
+    roots: [38, 43, 40, 45], // Dm - G - Em - Am，多利安味
+    scale: [0, 2, 3, 5, 7, 9],
+    padWave: 'triangle',
+    arpWave: 'triangle',
+    tone: 1.15,
+  },
+  {
+    id: 'deep-alarm',
+    name: '深層警報',
+    roots: [40, 41, 36, 40], // Em - F - C - Em，弗里吉安，最陰
+    scale: [0, 1, 3, 5, 7, 8],
+    padWave: 'sawtooth',
+    arpWave: 'sawtooth',
+    tone: 0.85,
+  },
+  {
+    id: 'cooling-loop',
+    name: '冷卻循環',
+    roots: [36, 43, 41, 39], // Cm - G - F - D#，最平靜
+    scale: [0, 3, 5, 7, 10],
+    padWave: 'sine',
+    arpWave: 'sine',
+    tone: 1.25,
+  },
+  {
+    id: 'breach-protocol',
+    name: '突破協議',
+    roots: [45, 40, 41, 44], // Am - Em - F - G#，和聲小調，最緊繃
+    scale: [0, 3, 5, 8, 11],
+    padWave: 'square',
+    arpWave: 'square',
+    tone: 0.95,
+  },
+];
 
 const MODES = {
-  hub: { bpm: 62, pad: 0.5, bass: 0, arp: 0, hat: 0, kick: 0, cutoff: 620 },
-  map: { bpm: 74, pad: 0.55, bass: 0.5, arp: 0.12, hat: 0, kick: 0, cutoff: 800 },
-  battle: { bpm: 96, pad: 0.5, bass: 0.75, arp: 0.32, hat: 0.5, kick: 0.6, cutoff: 1100 },
-  boss: { bpm: 108, pad: 0.6, bass: 0.95, arp: 0.45, hat: 0.7, kick: 0.85, cutoff: 1500 },
-  result: { bpm: 60, pad: 0.45, bass: 0.25, arp: 0, hat: 0, kick: 0, cutoff: 560 },
+  hub: { bpm: 64, pad: 0.9, drone: 0.9, bass: 0.35, arp: 0.16, hat: 0, kick: 0, cutoff: 700 },
+  map: { bpm: 76, pad: 0.95, drone: 0.85, bass: 0.6, arp: 0.24, hat: 0, kick: 0, cutoff: 900 },
+  battle: { bpm: 98, pad: 0.85, drone: 0.7, bass: 0.9, arp: 0.4, hat: 0.55, kick: 0.7, cutoff: 1250 },
+  boss: { bpm: 110, pad: 1.0, drone: 0.8, bass: 1.0, arp: 0.5, hat: 0.75, kick: 0.9, cutoff: 1650 },
+  result: { bpm: 62, pad: 0.8, drone: 0.9, bass: 0.3, arp: 0.1, hat: 0, kick: 0, cutoff: 640 },
 };
 
 const midiToFreq = (m) => 440 * 2 ** ((m - 69) / 12);
@@ -233,31 +294,89 @@ const midiToFreq = (m) => 440 * 2 ** ((m - 69) / 12);
 const LOOKAHEAD_S = 0.15; // 往前排程多久
 const TICK_MS = 30; // 排程器檢查間隔
 
+// ---------------------------------------------------------------- 持續低鳴
+//
+// 一個從頭到尾不停的低頻墊底。
+// 沒有它的話，pad 每小節才鋪一次，量出來只有 20% 到 46% 的時間有聲音，
+// 中間的空拍會讓人以為 BGM 根本沒在播。
+
+function ensureDrone() {
+  const ctx = state.ctx;
+  if (!ctx || state.drone) return;
+
+  const gain = ctx.createGain();
+  gain.gain.value = 0;
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = 420;
+  filter.Q.value = 0.7;
+  filter.connect(gain);
+  gain.connect(state.musicBus);
+
+  const oscs = [-5, 5].map((detune) => {
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.detune.value = detune;
+    o.frequency.value = midiToFreq(33);
+    o.connect(filter);
+    o.start();
+    return o;
+  });
+
+  state.drone = { oscs, gain, filter };
+}
+
+function setDrone(root, cfg) {
+  const d = state.drone;
+  const ctx = state.ctx;
+  if (!d || !ctx) return;
+  const t = ctx.currentTime;
+  for (const o of d.oscs) o.frequency.setTargetAtTime(midiToFreq(root - 12), t, 0.35);
+  d.filter.frequency.setTargetAtTime(cfg.cutoff * 0.55, t, 0.5);
+  d.gain.gain.setTargetAtTime(0.05 * cfg.drone, t, 0.4);
+}
+
+function stopDrone() {
+  const d = state.drone;
+  if (!d || !state.ctx) return;
+  d.gain.gain.setTargetAtTime(0, state.ctx.currentTime, 0.2);
+}
+
+// ---------------------------------------------------------------- 排程
+
 function scheduleStep(step, time, cfg) {
   const ctx = state.ctx;
   const bus = state.musicBus;
-  const root = ROOTS[Math.floor(step / 16) % ROOTS.length];
+  const track = state.track;
+  const root = track.roots[Math.floor(step / 16) % track.roots.length];
   const inBar = step % 16;
   const beat = 60 / cfg.bpm;
 
   // 每小節換和弦時鋪一次 pad
   if (inBar === 0 && cfg.pad > 0) {
-    const dur = beat * 4.4;
-    for (const [semi, det] of [[0, -7], [0, 7], [12, 4], [7, -4]]) {
+    setDrone(root, cfg);
+
+    const dur = beat * 4.3;
+    for (const [semi, det] of [[0, -8], [0, 8], [12, 5], [7, -5], [15, 3]]) {
       const osc = ctx.createOscillator();
       const g = ctx.createGain();
       const f = ctx.createBiquadFilter();
-      osc.type = 'sawtooth';
+      osc.type = track.padWave;
       osc.detune.value = det;
       osc.frequency.value = midiToFreq(root + semi);
       f.type = 'lowpass';
-      f.frequency.setValueAtTime(cfg.cutoff * 0.55, time);
-      f.frequency.linearRampToValueAtTime(cfg.cutoff, time + dur * 0.45);
-      f.frequency.linearRampToValueAtTime(cfg.cutoff * 0.5, time + dur);
-      f.Q.value = 3;
+      f.frequency.setValueAtTime(cfg.cutoff * 0.6 * track.tone, time);
+      f.frequency.linearRampToValueAtTime(cfg.cutoff * track.tone, time + dur * 0.5);
+      f.frequency.linearRampToValueAtTime(cfg.cutoff * 0.55 * track.tone, time + dur);
+      f.Q.value = 2.5;
+
+      // 撐住整個小節再放掉。原本 30% 就開始衰減，導致小節後半幾乎沒聲音。
+      const peak = 0.085 * cfg.pad;
       g.gain.setValueAtTime(0.0001, time);
-      g.gain.linearRampToValueAtTime(0.05 * cfg.pad, time + dur * 0.3);
+      g.gain.linearRampToValueAtTime(peak, time + dur * 0.22);
+      g.gain.setValueAtTime(peak, time + dur * 0.72);
       g.gain.linearRampToValueAtTime(0.0001, time + dur);
+
       osc.connect(f); f.connect(g); g.connect(bus);
       osc.start(time);
       osc.stop(time + dur + 0.05);
@@ -271,30 +390,30 @@ function scheduleStep(step, time, cfg) {
     osc.type = 'triangle';
     osc.frequency.setValueAtTime(midiToFreq(root - 12), time);
     g.gain.setValueAtTime(0.0001, time);
-    g.gain.exponentialRampToValueAtTime(0.16 * cfg.bass, time + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, time + beat * 1.6);
+    g.gain.exponentialRampToValueAtTime(0.2 * cfg.bass, time + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + beat * 1.8);
     osc.connect(g); g.connect(bus);
     osc.start(time);
-    osc.stop(time + beat * 1.7);
+    osc.stop(time + beat * 1.9);
   }
 
   // 琶音：稀疏、隨機，避免聽出循環
   if (cfg.arp > 0 && Math.random() < cfg.arp) {
-    const semi = PENTATONIC[Math.floor(Math.random() * PENTATONIC.length)];
+    const semi = track.scale[Math.floor(Math.random() * track.scale.length)];
     const oct = Math.random() < 0.35 ? 24 : 12;
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
-    osc.type = 'square';
+    osc.type = track.arpWave;
     osc.frequency.value = midiToFreq(root + semi + oct);
     const f = ctx.createBiquadFilter();
     f.type = 'lowpass';
-    f.frequency.value = 2600;
+    f.frequency.value = 2800 * track.tone;
     g.gain.setValueAtTime(0.0001, time);
-    g.gain.exponentialRampToValueAtTime(0.035, time + 0.005);
-    g.gain.exponentialRampToValueAtTime(0.0001, time + beat * 0.4);
+    g.gain.exponentialRampToValueAtTime(0.055, time + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + beat * 0.5);
     osc.connect(f); f.connect(g); g.connect(bus);
     osc.start(time);
-    osc.stop(time + beat * 0.5);
+    osc.stop(time + beat * 0.6);
   }
 
   // 打擊
@@ -304,11 +423,11 @@ function scheduleStep(step, time, cfg) {
     osc.type = 'sine';
     osc.frequency.setValueAtTime(120, time);
     osc.frequency.exponentialRampToValueAtTime(42, time + 0.12);
-    g.gain.setValueAtTime(0.22 * cfg.kick, time);
-    g.gain.exponentialRampToValueAtTime(0.0001, time + 0.16);
+    g.gain.setValueAtTime(0.26 * cfg.kick, time);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + 0.18);
     osc.connect(g); g.connect(bus);
     osc.start(time);
-    osc.stop(time + 0.2);
+    osc.stop(time + 0.22);
   }
   if (cfg.hat > 0 && inBar % 4 === 2) {
     const src = ctx.createBufferSource();
@@ -317,7 +436,7 @@ function scheduleStep(step, time, cfg) {
     hp.type = 'highpass';
     hp.frequency.value = 7000;
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.035 * cfg.hat, time);
+    g.gain.setValueAtTime(0.05 * cfg.hat, time);
     g.gain.exponentialRampToValueAtTime(0.0001, time + 0.05);
     src.connect(hp); hp.connect(g); g.connect(bus);
     src.start(time);
@@ -336,14 +455,34 @@ function scheduler() {
       scheduleStep(state.step, state.nextNoteTime, cfg);
     } catch { /* 單一音符失敗不該讓整首停掉 */ }
     state.nextNoteTime += stepDur;
-    state.step = (state.step + 1) % (16 * ROOTS.length);
+    state.step = (state.step + 1) % (16 * state.track.roots.length);
   }
+}
+
+// ---------------------------------------------------------------- 曲目
+
+function pickTrack(exceptId) {
+  const pool = TRACKS.filter((t) => t.id !== exceptId);
+  return pool[Math.floor(Math.random() * pool.length)] || TRACKS[0];
+}
+
+export function currentTrack() {
+  return state.track ? { id: state.track.id, name: state.track.name } : null;
+}
+
+// 換一首（玩家可以手動跳過，戰鬥開始時也會自動換）
+export function shuffleTrack() {
+  state.track = pickTrack(state.track?.id);
+  state.step = 0;
+  return currentTrack();
 }
 
 export function startMusic(mode) {
   state.mode = mode;
+  if (!state.track) state.track = pickTrack();
   const ctx = state.ctx;
   if (!ctx) return; // 還沒有使用者手勢，ensureAudio 之後會自動接手
+  ensureDrone();
   if (state.timer) return;
   state.nextNoteTime = ctx.currentTime + 0.1;
   state.timer = setInterval(scheduler, TICK_MS);
@@ -351,14 +490,18 @@ export function startMusic(mode) {
 
 export function stopMusic() {
   if (state.timer) { clearInterval(state.timer); state.timer = null; }
+  stopDrone();
   state.mode = null;
 }
 
 // 切換段落。同一個 mode 重複呼叫不會重啟，避免每幀重設。
+// 進戰鬥時順便換一首，讓每場仗聽起來不一樣。
 export function setMusicMode(mode) {
   if (state.mode === mode) return;
+  const enteringFight = (mode === 'battle' || mode === 'boss') && state.mode !== 'battle' && state.mode !== 'boss';
   const wasRunning = !!state.timer;
   state.mode = mode;
+  if (enteringFight) shuffleTrack();
   if (!wasRunning) startMusic(mode);
 }
 
@@ -370,7 +513,7 @@ export function toggleMusic() {
   if (state.musicBus && state.ctx) {
     const t = state.ctx.currentTime;
     state.musicBus.gain.cancelScheduledValues(t);
-    state.musicBus.gain.setTargetAtTime(state.musicOn ? 0.22 : 0, t, 0.15);
+    state.musicBus.gain.setTargetAtTime(state.musicOn ? MUSIC_GAIN : 0, t, 0.15);
   }
   if (state.musicOn) ensureAudio();
   return state.musicOn;
@@ -379,11 +522,31 @@ export function toggleMusic() {
 export function toggleSfx() {
   state.sfxOn = !state.sfxOn;
   savePrefs();
-  if (state.sfxBus && state.ctx) state.sfxBus.gain.value = state.sfxOn ? 0.55 : 0;
+  if (state.sfxBus && state.ctx) state.sfxBus.gain.value = state.sfxOn ? SFX_GAIN : 0;
   if (state.sfxOn) ensureAudio();
   return state.sfxOn;
 }
 
+// 音樂匯流排目前的 RMS 音量（0 到 1）。測試靠這個判斷「真的有沒有在出聲」。
+export function musicLevel() {
+  const a = state.musicAnalyser;
+  if (!a) return 0;
+  const buf = new Float32Array(a.fftSize);
+  a.getFloatTimeDomainData(buf);
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+  return Math.sqrt(sum / buf.length);
+}
+
 export function audioState() {
-  return { music: state.musicOn, sfx: state.sfxOn, started: !!state.ctx, mode: state.mode };
+  return {
+    music: state.musicOn,
+    sfx: state.sfxOn,
+    started: !!state.ctx,
+    running: state.ctx?.state === 'running',
+    scheduling: !!state.timer,
+    mode: state.mode,
+    track: state.track ? state.track.name : null,
+    level: musicLevel(),
+  };
 }

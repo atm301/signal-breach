@@ -55,6 +55,7 @@
     "icon-supply"
   ],
   "ui": [
-    "panel-backdrop"
+    "panel-backdrop",
+    "title-bg"
   ]
 }

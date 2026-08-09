@@ -23,11 +23,12 @@ npm run dev            # 本機開發 http://localhost:5178（ES module 不能�
 npm run sim            # 玩法評估器，跑 300 場，輸出勝率／深度分佈／回合長度
 npm run sim:max        # 模擬永久升級點滿的老玩家
 npm run sim:long       # 跑 2000 場，數字比較穩
-npm test               # Playwright 整合測試（27 項斷言 + console error 檢查）
+npm test               # Playwright 整合測試（35 項斷言 + console error 檢查）
 npm run check          # sim + test 一起跑
 npm run shots          # 各畫面截圖到 test-output/shots/，要人眼看
 npm run assets         # 重切素材表 + 重做 OG 圖
 npm run assets:review  # 素材接觸表（深色底），檢查去背與損傷遞進
+npm run check:audio    # 量各 BGM 段落實際輸出的 RMS，抓「有播但聽不到」
 ```
 
 **改完任何數值都要跑 `npm run sim`。** 它會在指標跑出區間時 exit 1。
@@ -46,7 +47,8 @@ src/
   mapgen.js         隨機分岔關卡樹生成 + 連通性驗證
   engine.js         ★ 純邏輯：戰鬥、AI、run 狀態機、事件／商店／補給。零 DOM
   meta.js           localStorage 跨 run 永久進度
-  audio.js          Web Audio 即時合成的音效與 BGM。零音檔
+  audio.js          Web Audio 即時合成的音效與 5 首 BGM。零音檔
+  save.js           出擊存檔（跟 meta 分開：meta 是跨局進度，這裡是這一場打到哪）
   assets.js         AI 素材載入 + 損傷階段判定。缺圖時優雅降級
   render.js         canvas 繪製（戰鬥棋盤 + 關卡樹）。只讀 state，不改
   ui.js             DOM 面板。重建 innerHTML + 事件委派，靠 signature 比對避免每幀重繪
@@ -73,6 +75,7 @@ serve.mjs           零依賴靜態伺服器（開發 + 測試共用）
 - **AP 只用來移動。攻擊每回合限一次，且需保留 1 AP。**
   這條是刻意的，理由寫在 BALANCE.md 第 1 節。拿掉它戰鬥會退化成 2 回合互砍。
 - **掩體**對距離 >= 2 的攻擊減傷 1。近戰不受掩體影響。
+- 畫面狀態機：`title` → `hub` → `map` → `battle` → `victory` → `map` ...，另有 `credits` / `event` / `shop` / `supply` / `result`。
 - 肅清全部敵人後會停在**通關結算畫面**（`screen === 'victory'`），按「繼續推進」才回地圖。
   加新畫面時記得同步教會 `tools/simulate.mjs` 的機器人，否則模擬器會卡住。
 - 一個 run = 12 層（F0 登陸點 → F11 頭目），中間走分岔路線。
@@ -126,6 +129,22 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 
 ⚠️ `codex/images/` 是大張原始表（約 13MB），**不要刪**，重新切圖或改輸出尺寸都靠它。
 
+## 存檔
+
+兩份 localStorage，用途不同，不要搞混：
+
+| key | 內容 | 什麼時候清 |
+|---|---|---|
+| `sft_meta_v1` | 跨局永久進度：核心碎片、升級、統計 | 只有玩家按「重置所有進度」 |
+| `sft_run_v1` | 這一場出擊的完整狀態 | run 結束、放棄、開新出擊 |
+| `sft_audio_v1` | 音樂／音效開關 | 不清 |
+
+⚠️ **`newRun()` 裡絕對不能呼叫 `clearRun()`。** 開機時會叫一次 `newRun()` 當佔位，
+在那裡清檔等於每次重新載入頁面都把存檔刪掉。清檔只放在真正「開新出擊」的 action 裡。
+
+⚠️ 存檔存了 **RNG 的內部位置**（不只是 seed）。只存 seed 的話，讀檔後所有後續隨機會重跑一次，
+地圖一樣但敵人配置全變 —— 那不是存檔，是重生。
+
 ## 常見改動怎麼下手
 
 | 想做的事 | 改哪裡 |
@@ -138,7 +157,9 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 | 改敵方 AI | `src/engine.js` 的 `bestTarget` / `bestMove` / `actEnemy` |
 | 改畫面 | `src/render.js`（canvas）或 `src/ui.js`（面板） |
 | 改損傷階段門檻 | `src/assets.js` 的 `damageState`（目前 66% / 33%） |
-| 改音樂／音效 | `src/audio.js`。`SFX` 是音效配方表，`MODES` 是四種 BGM 段落 |
+| 改音樂／音效 | `src/audio.js`。`SFX` 是音效配方表，`TRACKS` 是 5 首曲子，`MODES` 是段落強度 |
+| 改作者的話 | `src/data.js` 的 `CREDITS` / `CREDITS_META` |
+| 改存檔格式 | `src/save.js`。改結構要同步升 `VERSION`，舊存檔會自動作廢 |
 | 改單位朝向 | `src/render.js` 的 `facingOf` |
 | 換素材風格 | `codex/style-guide.md` 的 code block，然後全部重生 |
 
@@ -166,6 +187,7 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 - `index.html` 裡的網址是 `tactics.atmarketing.tw` 佔位，部署前要確認
 - 手機觸控可用但未針對小螢幕重新排版面板
 - 尚未做戰鬥動畫（單位移動是瞬移，沒有補間）
+- 作者的話的文案是 AI 代筆的初稿，等作者本人改
 - BGM 是程序合成的環境音，沒有記憶點強的主旋律
 
 ---

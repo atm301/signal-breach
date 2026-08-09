@@ -1,7 +1,7 @@
 // DOM 面板層。用「重建 innerHTML + 事件委派」的方式，
 // 所以重繪不會弄丟 handler；靠 signature 比對避免每一幀都重建。
 
-import { TREE, META_UPGRADES, NODE_TYPES, FLOORS } from './data.js';
+import { TREE, META_UPGRADES, NODE_TYPES, FLOORS, CREDITS, CREDITS_META } from './data.js';
 import { availableNodes, squadAlive, xpToNext, unitById } from './engine.js';
 import { upgradeList } from './meta.js';
 import { playSfx } from './audio.js';
@@ -59,7 +59,7 @@ export function createUI(root, actions) {
 
   return {
     render(g, meta, opts = {}) {
-      const sig = `${signature(g, meta)}~${opts.music}~${opts.sfx}${opts.force ? Math.random() : ''}`;
+      const sig = `${signature(g, meta)}~${opts.music}~${opts.sfx}~${opts.track}~${opts.save ? opts.save.savedAt : '-'}${opts.force ? Math.random() : ''}`;
       if (sig === lastSig) return;
       lastSig = sig;
       root.innerHTML = panelHtml(g, meta, opts);
@@ -71,6 +71,10 @@ export function createUI(root, actions) {
 // ---------------------------------------------------------------- 面板組裝
 
 function panelHtml(g, meta, opts) {
+  // 開場與作者的話不顯示 topBar：那上面全是「這一場出擊」的數字，這兩個畫面用不到
+  if (g.screen === 'title') return titlePanel(meta, opts);
+  if (g.screen === 'credits') return creditsPanel();
+
   const parts = [topBar(g, meta, opts)];
 
   switch (g.screen) {
@@ -110,6 +114,105 @@ function topBar(g, meta, opts) {
     <div class="row1">
       ${btn('toHub', '放棄並返回基地', { disabled: !inRun, cls: 'danger' })}
     </div>`;
+}
+
+// ---------------------------------------------------------------- 開場畫面
+
+function relTime(ts) {
+  if (!ts) return '';
+  const min = Math.round((Date.now() - ts) / 60000);
+  if (min < 1) return '剛剛';
+  if (min < 60) return `${min} 分鐘前`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr} 小時前`;
+  return `${Math.round(hr / 24)} 天前`;
+}
+
+function titlePanel(meta, opts) {
+  const save = opts.save;
+  const s = meta.stats;
+
+  const resume = save
+    ? `
+      <div class="item resume">
+        <div class="item-head">
+          <b>未完成的出擊</b>
+          <span class="tag">${esc(relTime(save.savedAt))}</span>
+        </div>
+        <div class="item-body">
+          第 ${save.floor} 層 ｜ 已擊殺 ${save.kills} ｜ 種子 ${esc(save.seedLabel)}<br>
+          ${save.squad.map((u) => `${esc(u.n)} ${u.hp}/${u.mhp}`).join('　')}
+        </div>
+        ${btn('resumeRun', '繼續這場出擊', { cls: 'primary' })}
+        ${btn('deleteSave', '刪除這筆存檔', { cls: 'danger' })}
+      </div>`
+    : '<p class="hint">目前沒有進行中的出擊。進度會在每次移動後自動存檔，關掉分頁也不會消失。</p>';
+
+  const veteran = s.runs > 0
+    ? `<div class="statgrid">
+         <div><span>出擊次數</span><b>${s.runs}</b></div>
+         <div><span>通關次數</span><b>${s.wins}</b></div>
+         <div><span>最深層數</span><b>${s.bestDepth}</b></div>
+       </div>`
+    : '';
+
+  return `
+    <section class="title-hero">
+      <div class="row1">${btn('play', s.runs > 0 ? '進入作戰基地' : '開始遊玩', { cls: 'primary big' })}</div>
+      <div class="row2">
+        ${btn('startDaily', '每日挑戰')}
+        ${btn('credits', '作者的話')}
+      </div>
+      <div class="row2">
+        ${btn('music', opts.music ? '♪ 音樂 開' : '♪ 音樂 關', { cls: opts.music ? 'on' : '' })}
+        ${btn('sfx', opts.sfx ? '♬ 音效 開' : '♬ 音效 關', { cls: opts.sfx ? 'on' : '' })}
+      </div>
+      ${opts.track ? `<p class="hint nowplaying">♪ 現正播放：${esc(opts.track)}　${btn('shuffle', '換一首')}</p>` : ''}
+    </section>
+    <section>
+      <h2>存檔</h2>
+      ${resume}
+    </section>
+    ${veteran ? `<section><h2>戰績</h2>${veteran}<p class="hint">核心碎片 ${meta.cores}</p></section>` : ''}
+    <section>
+      <h2>怎麼玩</h2>
+      <p class="hint">
+        5x5 網格回合制戰棋。三人小隊，打穿 12 層隨機關卡。<br><br>
+        <b>核心規則：AP 只用來移動，攻擊每回合限一次</b>，而且要留得出 1 點 AP。<br>
+        站掩體可以擋掉 2 格以外的遠程傷害。<br><br>
+        死了就從頭來，但賺到的核心碎片會留下來換永久升級。
+      </p>
+    </section>`;
+}
+
+// ---------------------------------------------------------------- 作者的話
+
+function creditsPanel() {
+  const body = CREDITS.map((block) => `
+    ${block.h ? `<h3 class="credit-h">${esc(block.h)}</h3>` : ''}
+    ${block.p.map((t) => `<p class="credit-p">${esc(t)}</p>`).join('')}
+  `).join('');
+
+  const m = CREDITS_META;
+  return `
+    <section>
+      <div class="row1">${btn('titleBack', '← 回開場畫面')}</div>
+    </section>
+    <section class="credits">
+      ${body}
+      <div class="credit-sign">
+        <b>${esc(m.author)}</b>　${esc(m.handle)}<br>
+        ${esc(m.org)}<br>
+        <a href="https://${m.site}" target="_blank" rel="noopener">${esc(m.site)}</a><br>
+        <a href="https://${m.repo}" target="_blank" rel="noopener">${esc(m.repo)}</a>
+      </div>
+    </section>
+    <section>
+      <h2>用了什麼</h2>
+      <div class="list">
+        ${m.builtWith.map((t) => `<div class="item"><div class="item-body">${esc(t)}</div></div>`).join('')}
+      </div>
+    </section>`;
 }
 
 // ---------------------------------------------------------------- 大廳
@@ -427,6 +530,8 @@ function logPanel(g) {
 
 // 給 main.js 用來畫 canvas 下方的 HUD
 export function hudHtml(g) {
+  // 開場與作者的話沒有「這一場」可言，那排戰局數據要收掉
+  if (g.screen === 'title' || g.screen === 'credits') return '';
   if (g.screen === 'battle' && g.battle) {
     const b = g.battle;
     const alive = squadAlive(g).length;

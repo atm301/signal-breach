@@ -32,7 +32,26 @@ const shot = async (name) => {
 
 console.log('截圖中：');
 
+// 0) 開場畫面
+await shot('0-title');
+
+// 0b) 作者的話
+await page.evaluate(() => window.game_actions.credits());
+await shot('0b-credits');
+
+// 0c) 有存檔時的開場畫面（「繼續這場出擊」那張卡）
+await page.evaluate(() => {
+  window.game_actions.titleBack();
+  window.game_actions.startRun();
+  const g = window.__game();
+  window.game_actions.goNode(g.map.nodes[g.currentNodeId].next[0]);
+});
+await page.waitForTimeout(350); // 等自動存檔
+await page.evaluate(() => { window.__game().screen = 'title'; window.__debug.refreshTitleSave(); });
+await shot('0c-title-with-save');
+
 // 1) 大廳
+await page.evaluate(() => window.game_actions.play());
 await shot('1-hub');
 
 // 2) 有碎片可花的大廳（驗證購買按鈕的啟用樣式）

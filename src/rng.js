@@ -24,6 +24,10 @@ export function makeRng(seed) {
 
   return {
     next,
+    // 內部狀態的存讀。存檔要能從「這一場已經抽到一半」的地方接回去，
+    // 只記 seed 是不夠的 —— 那會讓讀檔後的後續隨機全部重跑一次。
+    getState: () => a >>> 0,
+    setState: (v) => { a = v >>> 0; },
     // [0, n)
     int: (n) => Math.floor(next() * n),
     // [min, max] 含頭含尾

@@ -57,6 +57,7 @@ body {
 }
 
 .hud { margin-top: 8px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.hud:empty { display: none; margin: 0; }
 .hud > div {
   border: 1px solid #3a596a; border-radius: 8px; padding: 6px;
   background: #152a35; font-size: 12px; color: var(--mut);
@@ -159,6 +160,33 @@ button.primary {
   font-weight: 700;
 }
 button.primary:hover:not(:disabled) { background: #247256; border-color: #8fe0b0; }
+
+/* 開場畫面 */
+.title-hero { padding-top: 4px; }
+button.big { padding: 15px; font-size: 16px; font-weight: 800; letter-spacing: 2px; }
+.nowplaying {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 12px; padding-top: 10px; border-top: 1px solid #2b4655;
+}
+.nowplaying button { width: auto; padding: 4px 12px; font-size: 12px; }
+.item.resume { border-color: var(--ok); background: #13302a; }
+.item.resume button { margin-top: 6px; }
+
+/* 作者的話 */
+.credits { line-height: 1.95; }
+.credit-h {
+  margin: 22px 0 8px; font-size: 14px; color: var(--ok);
+  letter-spacing: 1px; border-left: 3px solid var(--ok); padding-left: 9px;
+}
+.credit-h:first-child { margin-top: 0; }
+.credit-p { margin: 0 0 12px; font-size: 13.5px; color: #c3d5df; }
+.credit-sign {
+  margin-top: 26px; padding-top: 16px; border-top: 1px solid #2b4655;
+  font-size: 12.5px; color: var(--mut); line-height: 2;
+}
+.credit-sign b { color: var(--ink); font-size: 14px; }
+.credit-sign a { color: var(--p); text-decoration: none; }
+.credit-sign a:hover { text-decoration: underline; }
 
 /* 地圖清單裡的節點圖示 */
 .node-icon {
