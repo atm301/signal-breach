@@ -33,6 +33,7 @@ const screen = await page.evaluate(() => (window.__game ? window.__game().screen
 // 真的玩一步：開 run、進第一個節點、確認戰鬥起得來
 const played = await page.evaluate(() => {
   try {
+    window.game_actions.play();
     window.game_actions.startRun();
     const g = window.__game();
     window.game_actions.goNode(g.map.nodes[g.currentNodeId].next[0]);
@@ -46,7 +47,14 @@ const meta = await page.evaluate(() => ({
   canonical: document.querySelector('link[rel=canonical]')?.href ?? null,
   ogImage: document.querySelector('meta[property="og:image"]')?.content ?? null,
 }));
-const ogRes = meta.ogImage ? await page.request.get(meta.ogImage).catch(() => null) : null;
+// 用瀏覽器正常的圖片載入路徑驗，不要用 apiRequestContext。
+// 後者走另一條網路堆疊，在某些環境會 ECONNRESET 而誤報成「OG 圖掛了」。
+const ogOk = meta.ogImage ? await page.evaluate((url) => new Promise((resolve) => {
+  const img = new Image();
+  img.onload = () => resolve({ ok: img.naturalWidth > 0, w: img.naturalWidth, h: img.naturalHeight });
+  img.onerror = () => resolve({ ok: false, w: 0, h: 0 });
+  img.src = url;
+}), meta.ogImage) : { ok: false, w: 0, h: 0 };
 
 await browser.close();
 
@@ -57,12 +65,14 @@ const realErrors = errors.filter((e) => !external(e));
 
 const checks = {
   頁面載入: screen !== null,
-  開場為大廳: screen === 'hub',
+  開場為標題畫面: screen === 'title',
   單位素材33: assets?.units === 33,
+  圖示素材8: assets?.icons === 8,
+  UI素材2: assets?.ui === 2,
   道具素材6: assets?.props === 6,
   能開始出擊: played.screen === 'battle',
   關卡樹完整: played.floors >= 12,
-  OG圖可存取: ogRes?.ok() === true,
+  OG圖可存取: ogOk.ok === true,
   無失敗請求: realBad.length === 0,
   無console錯誤: realErrors.length === 0,
 };
@@ -70,7 +80,7 @@ const checks = {
 console.log(`\n網址        ${target}`);
 console.log(`標題        ${meta.title}`);
 console.log(`canonical   ${meta.canonical}`);
-console.log(`OG 圖       ${meta.ogImage}  → ${ogRes ? ogRes.status() : 'n/a'} ${ogRes?.headers()['content-type'] ?? ''}`);
+console.log(`OG 圖       ${meta.ogImage}  → ${ogOk.ok ? `載入成功 ${ogOk.w}x${ogOk.h}` : '載入失敗'}`);
 console.log(`素材        units=${assets?.units} props=${assets?.props}`);
 console.log(`實際遊玩    畫面=${played.screen} 場上單位=${played.units} 節點數=${played.floors}`);
 if (realBad.length) console.log(`失敗請求    ${realBad.join('\n            ')}`);
