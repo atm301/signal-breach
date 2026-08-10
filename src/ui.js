@@ -2,7 +2,7 @@
 // 所以重繪不會弄丟 handler；靠 signature 比對避免每一幀都重建。
 
 import { TREE, META_UPGRADES, NODE_TYPES, FLOORS, CREDITS, CREDITS_META } from './data.js';
-import { availableNodes, squadAlive, xpToNext, unitById } from './engine.js';
+import { availableNodes, squadAlive, xpToNext, unitById, actableUnits } from './engine.js';
 import { upgradeList } from './meta.js';
 import { playSfx } from './audio.js';
 import { nodeIconUrl } from './assets.js';
@@ -48,7 +48,7 @@ export function createUI(root, actions) {
     g.currentNodeId,
     g.log.length,
     g.squad.map((u) => `${u.hp}/${u.mhp}|${u.ap}|${u.attacked}|${u.lv}|${u.sp}|${u.atk}|${u.rg}|${u.path}|${Object.keys(u.ul).join('')}|${u.alive}`).join(';'),
-    g.battle ? `${g.battle.turn}|${g.battle.phase}|${g.battle.actionMode}|${g.battle.selectedId}|${g.battle.units.filter((u) => u.alive).length}` : '-',
+    g.battle ? `${g.battle.turn}|${g.battle.phase}|${g.battle.selectedId}|${g.battle.units.filter((u) => u.alive).length}|${actableUnits(g).length}` : '-',
     g.pending.draft ? `d${g.pending.draft.unitId}${g.pending.draft.cards.map((c) => c.id).join('')}` : '-',
     g.pending.event ? `e${g.pending.event.id}${g.pending.event.resolved ? 'r' : ''}` : '-',
     g.pending.shop ? `s${g.pending.shop.items.map((i) => (i.sold ? 1 : 0)).join('')}` : '-',
@@ -303,19 +303,26 @@ function battlePanel(g) {
   const b = g.battle;
   const isPlayer = b.phase === 'player' && !g.pending.draft;
   const sel = unitById(g, b.selectedId);
+  const pending = actableUnits(g).length;
+  const allDone = isPlayer && pending === 0;
 
   return `
     <section>
       <h2>指令</h2>
-      <div class="row3">
-        ${btn('mode:move', '移動 (M)', { disabled: !isPlayer, cls: b.actionMode === 'move' ? 'on' : '' })}
-        ${btn('mode:attack', '攻擊 (A)', { disabled: !isPlayer, cls: b.actionMode === 'attack' ? 'on' : '' })}
-        ${btn('endturn', '結束回合 (E)', { disabled: !isPlayer })}
+      <div class="row1">
+        ${btn('endturn', allDone ? '結束回合（全員已行動）' : `結束回合　空白鍵`, {
+    disabled: !isPlayer,
+    cls: allDone ? 'primary big' : '',
+  })}
       </div>
+      <p class="hint turnstate">
+        ${isPlayer ? `還能行動：<b>${pending}</b> / ${squadAlive(g).length}` : (b.phase === 'ai' ? '敵方行動中' : '結算中')}
+        ${sel ? `　｜　選定 ${esc(sel.n)}（AP ${sel.ap}/${sel.map}${sel.attacked ? '・已出手' : ''}）` : ''}
+      </p>
       <p class="hint">
-        ${sel ? `目前選定：${esc(sel.n)}（AP ${sel.ap}/${sel.map}${sel.attacked ? '，本回合已攻擊' : ''}）` : '點擊我方單位選定'}<br>
-        AP 用來移動，<b>攻擊每回合限一次</b>且需保留 1 AP。單位右上角有橫槓 = 已出手。<br>
-        快捷鍵 M / A / E，Tab 切換單位，F 全螢幕
+        <b>點敵人就打，點空地就走</b>，不用先切模式。攻擊完會自動跳到下一個單位。<br>
+        AP 只用來移動，攻擊每回合限一次且需保留 1 AP。單位右上角有橫槓 = 已出手。<br>
+        Tab 切換單位，空白鍵或 E 結束回合，F 全螢幕
       </p>
     </section>`;
 }

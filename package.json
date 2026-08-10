@@ -16,7 +16,8 @@
     "assets:review": "node tools/asset-contact-sheet.mjs",
     "check:subpath": "node tools/check-subpath.mjs",
     "check:live": "node tools/check-live.mjs",
-    "check:audio": "node tools/check-audio.mjs"
+    "check:audio": "node tools/check-audio.mjs",
+    "check:pacing": "node tools/check-pacing.mjs"
   },
   "devDependencies": {
     "playwright": "^1.49.0"

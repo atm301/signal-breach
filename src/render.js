@@ -222,17 +222,23 @@ function drawHighlights(ctx, g, cell) {
   ctx.lineWidth = 3;
   ctx.strokeRect(PAD + u.x * cell + 4, PAD + u.y * cell + 4, cell - 8, cell - 8);
 
-  if (b.actionMode === 'move') {
-    ctx.fillStyle = 'rgba(113,217,147,.18)';
-    for (const t of reachableTiles(g, u)) {
-      ctx.fillRect(PAD + t.x * cell + 8, PAD + t.y * cell + 8, cell - 16, cell - 16);
-    }
-  } else if (!u.attacked) {
-    ctx.fillStyle = 'rgba(255,134,120,.22)';
+  // 移動範圍與可攻擊目標「同時」顯示。
+  // 原本要切模式才看得到另一半，等於逼玩家為了看資訊多按一次。
+  ctx.fillStyle = 'rgba(113,217,147,.16)';
+  for (const t of reachableTiles(g, u)) {
+    ctx.fillRect(PAD + t.x * cell + 8, PAD + t.y * cell + 8, cell - 16, cell - 16);
+  }
+
+  if (u.attacked < 1 && u.ap >= 1) {
     for (const e of aliveOf(g, 'e')) {
-      if (dist(u.x, u.y, e.x, e.y) <= u.rg) {
-        ctx.fillRect(PAD + e.x * cell + 8, PAD + e.y * cell + 8, cell - 16, cell - 16);
-      }
+      if (dist(u.x, u.y, e.x, e.y) > u.rg) continue;
+      const px = PAD + e.x * cell;
+      const py = PAD + e.y * cell;
+      ctx.fillStyle = 'rgba(255,134,120,.24)';
+      ctx.fillRect(px + 6, py + 6, cell - 12, cell - 12);
+      ctx.strokeStyle = 'rgba(255,134,120,.9)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(px + 6, py + 6, cell - 12, cell - 12);
     }
   }
 }

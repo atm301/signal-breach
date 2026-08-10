@@ -188,6 +188,9 @@ button.big { padding: 15px; font-size: 16px; font-weight: 800; letter-spacing: 2
 .credit-sign a { color: var(--p); text-decoration: none; }
 .credit-sign a:hover { text-decoration: underline; }
 
+.turnstate { font-size: 13px; color: var(--ink); }
+.turnstate b { color: var(--ok); font-size: 15px; }
+
 /* 地圖清單裡的節點圖示 */
 .node-icon {
   width: 26px; height: 26px; vertical-align: -7px;

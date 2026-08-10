@@ -19,7 +19,10 @@ import { renderBattle, renderMap, renderIdle, renderTitle, pickBoardTile, pickMa
 import { createUI, hudHtml } from './ui.js';
 import { dailySeed } from './rng.js';
 
-const AI_STEP_MS = 380;
+// 敵方回合的節奏。實測固定 380ms 讓玩家每場乾等 2.3 秒，而且大部分時間只是在看走位。
+// 改成依行動類型給不同時間：純走位快帶過，開火才留時間看清楚。
+const AI_MOVE_MS = 120;
+const AI_ATTACK_MS = 260;
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -33,6 +36,7 @@ let hoverNodeId = null;
 let aiAcc = 0;
 let resultRecorded = false;
 let lastFrame = performance.now();
+let aiDelay = AI_ATTACK_MS;
 
 // ---------------------------------------------------------------- 音樂段落
 
@@ -171,7 +175,7 @@ const actions = {
   select(id) { selectUnit(g, id); },
 
   mode(m) { setActionMode(g, m); },
-  endturn() { if (endPlayerTurn(g)) aiAcc = 0; },
+  endturn() { if (endPlayerTurn(g)) { aiAcc = 0; aiDelay = AI_MOVE_MS; } },
   tree(unitId, lv) {
     const res = spendSkillPoint(g, unitId, Number(lv));
     if (!res.ok) log(g, res.reason, true);
@@ -239,9 +243,7 @@ document.addEventListener('keydown', (ev) => {
   if (!g) return;
   if (ev.target instanceof HTMLInputElement) return;
   const k = ev.key.toLowerCase();
-  if (k === 'm') actions.mode('move');
-  if (k === 'a') actions.mode('attack');
-  if (k === 'e') actions.endturn();
+  if (k === 'e' || k === ' ') { ev.preventDefault(); actions.endturn(); }
   if (k === 's') actions.sfx();
   if (k === 'b') actions.music();
   if (k === 'f') {
@@ -299,10 +301,10 @@ function update(dt) {
 
   if (g.battle?.phase === 'ai') {
     aiAcc += dt;
-    while (aiAcc >= AI_STEP_MS) {
-      aiAcc -= AI_STEP_MS;
-      stepEnemy(g);
-      if (g.battle?.phase !== 'ai') break;
+    if (aiAcc >= aiDelay) {
+      aiAcc = 0;
+      const r = stepEnemy(g);
+      aiDelay = r && r.attacked ? AI_ATTACK_MS : AI_MOVE_MS;
     }
   }
 
@@ -365,6 +367,8 @@ window.__debug = {
   tapBoard: (x, y) => tapBoard(g, x, y),
   setMusicMode: (m) => setMusicMode(m),
   refreshTitleSave: () => refreshTitleSave(),
+  selectUnit: (id) => selectUnit(g, id),
+  setActionMode: (m) => setActionMode(g, m),
   playSfx: (k, f) => playSfx(k, f),
 };
 window.__assets = () => assetCount();

@@ -29,6 +29,7 @@ npm run shots          # 各畫面截圖到 test-output/shots/，要人眼看
 npm run assets         # 重切素材表 + 重做 OG 圖
 npm run assets:review  # 素材接觸表（深色底），檢查去背與損傷遞進
 npm run check:audio    # 量各 BGM 段落實際輸出的 RMS，抓「有播但聽不到」
+npm run check:pacing   # 量真實牆鐘時間與操作次數，抓「玩起來拖」
 ```
 
 **改完任何數值都要跑 `npm run sim`。** 它會在指標跑出區間時 exit 1。
@@ -72,6 +73,9 @@ serve.mjs           零依賴靜態伺服器（開發 + 測試共用）
 
 ## 遊戲規則（改動前務必理解）
 
+- **智慧點擊**：點敵人就打、點空地就走、點自己人就換選。沒有移動／攻擊模式。
+  移動範圍與可攻擊目標同時顯示。攻擊完（或走到沒 AP）會自動跳下一個單位。
+  這是量出來的：切模式佔 13% 的點擊、選單位佔 25%，六成點擊不是決策而是操作稅。
 - **AP 只用來移動。攻擊每回合限一次，且需保留 1 AP。**
   這條是刻意的，理由寫在 BALANCE.md 第 1 節。拿掉它戰鬥會退化成 2 回合互砍。
 - **掩體**對距離 >= 2 的攻擊減傷 1。近戰不受掩體影響。
@@ -161,6 +165,7 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 | 改作者的話 | `src/data.js` 的 `CREDITS` / `CREDITS_META` |
 | 改存檔格式 | `src/save.js`。改結構要同步升 `VERSION`，舊存檔會自動作廢 |
 | 改單位朝向 | `src/render.js` 的 `facingOf` |
+| 改敵方回合速度 | `src/main.js` 的 `AI_MOVE_MS` / `AI_ATTACK_MS`，然後跑 `npm run check:pacing` |
 | 換素材風格 | `codex/style-guide.md` 的 code block，然後全部重生 |
 
 **加了新的節點類型或新畫面時，記得同步更新 `tools/simulate.mjs` 的機器人**，

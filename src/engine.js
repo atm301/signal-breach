@@ -333,6 +333,9 @@ export function moveUnit(g, u, x, y) {
   u.ap -= cost;
   fx(g, { type: 'pulse', x, y, color: u.tm === 'p' ? '#5db6ff' : '#ff8678', life: 220, size: 1 });
   sfx(g, 'move');
+
+  // 走完沒 AP 就打不了了，直接跳下一個單位，省一次選取
+  if (u.tm === 'p' && u.ap < 1 && g.battle?.phase === 'player') autoSelectNext(g, u);
   return { ok: true, cost };
 }
 
@@ -387,10 +390,15 @@ export function attackUnit(g, attacker, target) {
   }
 
   checkBattleEnd(g);
+  if (attacker.tm === 'p' && g.battle?.phase === 'player') autoSelectNext(g, attacker);
   return { ok: true, dmg, killed };
 }
 
-// 玩家點擊棋盤格的統一入口
+// 玩家點擊棋盤格的統一入口。
+//
+// 智慧點擊：點敵人就打、點空格就走、點自己人就換選。
+// 不需要先切「移動／攻擊」模式 —— 實測顯示切模式佔了 13% 的點擊數，
+// 而且這件事本來就沒有歧義（敵人所在的格子不可能是移動目標）。
 export function tapBoard(g, x, y) {
   const b = g.battle;
   if (!b || b.phase !== 'player') return { ok: false, reason: '目前不是我方回合' };
@@ -405,9 +413,26 @@ export function tapBoard(g, x, y) {
   const sel = unitById(g, b.selectedId);
   if (!sel || !sel.alive) return { ok: false, reason: '請先選擇我方單位' };
 
-  if (b.actionMode === 'move') return moveUnit(g, sel, x, y);
-  if (!clicked || clicked.tm !== 'e') return { ok: false, reason: '攻擊模式請點擊敵人' };
-  return attackUnit(g, sel, clicked);
+  if (clicked && clicked.tm === 'e') return attackUnit(g, sel, clicked);
+  return moveUnit(g, sel, x, y);
+}
+
+// 這回合還能做事的我方單位（沒攻擊過，或還有 AP 可以移動）
+export function actableUnits(g) {
+  if (!g.battle || g.battle.phase !== 'player') return [];
+  return aliveOf(g, 'p').filter((u) => (u.attacked < TUNE.ATTACKS_PER_TURN && u.ap >= 1) || u.ap > 0);
+}
+
+// 攻擊完自動跳到下一個還沒出手的單位。
+// 實測「選單位」佔 25% 的點擊，而攻擊在實務上就是一個單位的終結動作。
+function autoSelectNext(g, current) {
+  const b = g.battle;
+  if (!b || b.phase !== 'player') return;
+  // 優先跳到「還沒攻擊而且打得動」的，其次才是只能移動的
+  const others = aliveOf(g, 'p').filter((u) => u.id !== current.id);
+  const next = others.find((u) => u.attacked < TUNE.ATTACKS_PER_TURN && u.ap >= 1)
+    || others.find((u) => u.ap > 0);
+  if (next) b.selectedId = next.id;
 }
 
 // ---------------------------------------------------------------- 經驗與升級
@@ -640,11 +665,16 @@ export function stepEnemy(g) {
   if (!id) { beginPlayerTurn(g); return false; }
 
   const u = unitById(g, id);
-  if (u && u.alive) actEnemy(g, u);
+  let attacked = false;
+  if (u && u.alive) {
+    const before = u.attacked;
+    actEnemy(g, u);
+    attacked = u.attacked > before;
+  }
 
-  if (b.phase !== 'ai') return false;
-  if (!b.aiQueue.length) { beginPlayerTurn(g); return false; }
-  return true;
+  if (b.phase !== 'ai') return { more: false, attacked };
+  if (!b.aiQueue.length) { beginPlayerTurn(g); return { more: false, attacked }; }
+  return { more: true, attacked };
 }
 
 // 模擬器與測試用：把整個敵方回合一次跑完
