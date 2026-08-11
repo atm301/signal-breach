@@ -45,7 +45,12 @@ function metaLevel(meta, id) {
 // ATK 只有 4-5，±1 就是 20-25% 的傷害差，抽到 -1 的先鋒等於整場報廢，
 // 那不是「隨機性」，那是開場就決定輸贏。想改 ATK 的請走詞條（神槍手/損耗），
 // 那至少是玩家在候補名單上看得到、可以選擇避開的。
-export function rollOperative(rng, meta, template) {
+// lookRng 是獨立的亂數流，專門給「只影響長相」的東西用。
+//
+// 第一版把 skin / look 直接抽在 rng 上，結果加了一套外觀變體之後
+// 整條隨機序列往後移，模擬通關率從 47.4% 變成 42.0% ——
+// 遊戲一點都沒變難，只是換了一組樣本。純美術的改動不該讓平衡數字失真。
+export function rollOperative(rng, meta, template, lookRng = rng) {
   const hpBonus = metaLevel(meta, 'hp') * 2;
   const atkBonus = metaLevel(meta, 'atk') * 1;
   const apBonus = metaLevel(meta, 'ap') >= 1 ? 1 : 0;
@@ -55,6 +60,11 @@ export function rollOperative(rng, meta, template) {
     id: uid(),
     tm: 'p',
     key: t.key,
+    // skin 與 look 只影響長相，不影響任何數值或 AI 判斷。
+    // look 存在單位上而不是每次從 id 算，是因為 id 只在這個 session 內有意義，
+    // 讀檔後要長得跟存檔前一模一樣，外觀種子就必須跟著存。
+    skin: t.skins ? t.skins[lookRng.int(t.skins.length)] : t.key,
+    look: lookRng.int(1 << 24),
     r: t.r,
     n: `${t.n}・${CALLSIGNS[rng.int(CALLSIGNS.length)]}`,
     role: t.n,
@@ -99,9 +109,9 @@ export function rollOperative(rng, meta, template) {
 
 // 候補名單。原型輪流出現（不是純隨機），確保 5 個候補一定涵蓋三種屬性，
 // 否則有機會抽到 5 個都是動能系 —— 相剋系統當場失效，那才是最壞的隨機。
-export function rollRecruits(rng, meta, n = TUNE.RECRUIT_POOL) {
+export function rollRecruits(rng, meta, n = TUNE.RECRUIT_POOL, lookRng = rng) {
   return Array.from({ length: n }, (_, i) => (
-    rollOperative(rng, meta, PLAYER_TEMPLATES[i % PLAYER_TEMPLATES.length])
+    rollOperative(rng, meta, PLAYER_TEMPLATES[i % PLAYER_TEMPLATES.length], lookRng)
   ));
 }
 
@@ -109,6 +119,8 @@ export function createGame({ seed, meta = { upgrades: {} } } = {}) {
   const seedInput = seed ?? Math.floor(Math.random() * 1e9);
   const rng = makeRng(hashSeed(seedInput));
   const labelRng = makeRng(hashSeed(`${seedInput}-label`));
+  // 外觀專用亂數流。跟 rng 分開，純美術的改動才不會動到平衡樣本。
+  const lookRng = makeRng(hashSeed(`${seedInput}-look`));
 
   const g = {
     seed: String(seedInput),
@@ -142,7 +154,7 @@ export function createGame({ seed, meta = { upgrades: {} } } = {}) {
     sfxQueue: [],
   };
 
-  g.recruits = rollRecruits(rng, meta);
+  g.recruits = rollRecruits(rng, meta, TUNE.RECRUIT_POOL, lookRng);
   g.squad = g.recruits.slice(0, TUNE.SQUAD_SIZE);
   g.focusId = g.squad[0]?.id ?? null;
   g.currentNodeId = g.map.startId;

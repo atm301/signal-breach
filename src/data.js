@@ -87,10 +87,12 @@ export const ROLES = {
 // 整個難度曲線被一項升級綁架。永久升級應該給的是深度，不是行動次數。
 // stab（穩定性 0-100）刻意做出差異：狙擊期望值高但很不穩，重裝穩定但平庸。
 // 這樣「穩定性」才是可以取捨的資源，而不是一視同仁的雜訊。
+// skins = 同一個原型的可用外觀。key 是玩法身分，skin 只是長相，
+// 兩者分開才不會「換一張圖就動到平衡」。
 export const PLAYER_TEMPLATES = [
-  { key: 'vanguard', r: 'V', n: '先鋒', hp: 18, atk: 5, rg: 1, ap: 3, el: 'kinetic', stab: 72 },
-  { key: 'sniper', r: 'S', n: '狙擊', hp: 14, atk: 5, rg: 2, ap: 2, el: 'emp', stab: 38 },
-  { key: 'engineer', r: 'E', n: '工兵', hp: 16, atk: 4, rg: 2, ap: 3, el: 'armor', stab: 60 },
+  { key: 'vanguard', r: 'V', n: '先鋒', hp: 18, atk: 5, rg: 1, ap: 3, el: 'kinetic', stab: 72, skins: ['vanguard', 'vanguardB'] },
+  { key: 'sniper', r: 'S', n: '狙擊', hp: 14, atk: 5, rg: 2, ap: 2, el: 'emp', stab: 38, skins: ['sniper', 'sniperB'] },
+  { key: 'engineer', r: 'E', n: '工兵', hp: 16, atk: 4, rg: 2, ap: 3, el: 'armor', stab: 60, skins: ['engineer', 'engineerB'] },
 ];
 
 // ---------------------------------------------------------------- 詞條

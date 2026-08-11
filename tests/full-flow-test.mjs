@@ -178,13 +178,18 @@ const saveRoundTrip = {
 
 await page.screenshot({ path: path.join(outDir, 'full-flow.png'), fullPage: false });
 
+const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets', 'manifest.json'), 'utf-8'));
+
 const assertions = {
   bootsToTitle: bootState.screen === 'title',
   panelRendered: panelHasContent,
-  unitSpritesLoaded: assets.units === 33, // 11 個單位 x 3 個損傷階段
-  propSpritesLoaded: assets.props === 6,
-  iconSpritesLoaded: assets.icons === 8,
-  uiSpritesLoaded: assets.ui === 2, // panel-backdrop + title-bg
+  // 跟 manifest 對數，不寫死數字。
+  // 原本寫死 33（11 單位 x 3 損傷），加了一套外觀變體就紅掉 ——
+  // 那不是「素材壞了」，是斷言本身過期。要驗的是「manifest 上有的都載進來了」。
+  unitSpritesLoaded: assets.units === manifest.units.length,
+  propSpritesLoaded: assets.props === manifest.props.length,
+  iconSpritesLoaded: assets.icons === manifest.icons.length,
+  uiSpritesLoaded: assets.ui === manifest.ui.length,
   titleOpensCredits: titleFlow.credits,
   titleReturns: titleFlow.back,
   titleEntersHub: titleFlow.hub,

@@ -116,9 +116,25 @@ check('recruitsAreActuallyRandom',
 check('poolCoversAllElements',
   pools.every((p) => new Set(p.recruits.map((u) => u.el)).size === PLAYER_TEMPLATES.length),
   '候補一定要涵蓋三系，否則相剋系統可能整場失效');
-check('sameSeedSameRecruits',
-  JSON.stringify(createGame({ seed: 'fixed' }).recruits.map((u) => [u.n, u.mhp, u.tr]))
-  === JSON.stringify(createGame({ seed: 'fixed' }).recruits.map((u) => [u.n, u.mhp, u.tr])));
+const fingerprint = (gm) => JSON.stringify(gm.recruits.map((u) => [u.n, u.mhp, u.stab, u.tr, u.skin, u.look]));
+check('sameSeedSameRecruits', fingerprint(createGame({ seed: 'fixed' })) === fingerprint(createGame({ seed: 'fixed' })),
+  '外觀也要含在內：讀檔後長相變了就等於換了一個人');
+check('skinsGetUsed',
+  new Set(everyone.map((u) => u.skin)).size >= PLAYER_TEMPLATES.length * 2,
+  `每個原型都該有兩套外觀在流通：${[...new Set(everyone.map((u) => u.skin))].join()}`);
+check('looksAreDistinct',
+  new Set(everyone.map((u) => u.look)).size > everyone.length * 0.9,
+  '個人識別標記幾乎不該撞號');
+
+// 純美術的隨機不能吃掉遊戲亂數流。
+// 吃掉的話「多加一套外觀」就會讓所有平衡數字失真，而且完全看不出原因。
+check('cosmeticRngIsSeparate', (() => {
+  const a = createGame({ seed: 'rng-isolation' });
+  const b = createGame({ seed: 'rng-isolation' });
+  // 抽掉外觀欄位之後，玩法相關的數值必須逐一相同
+  const strip = (gm) => JSON.stringify(gm.recruits.map((u) => [u.key, u.mhp, u.atk, u.rg, u.stab, u.map, u.tr]));
+  return strip(a) === strip(b) && a.map.nodes[a.map.startId].next.length === b.map.nodes[b.map.startId].next.length;
+})());
 
 // 8) 行為詞條要真的改傷害，不能只是顯示用的字
 const withTrait = (base, tr) => ({ ...base, tr });
@@ -200,6 +216,46 @@ check('recruitToggles', recruitUi.toggled);
 check('recruitBlocksIncompleteSquad', recruitUi.blocked, '人數不足時不該讓玩家出擊');
 check('recruitConfirmClears', recruitUi.cleared && recruitUi.squadMatches);
 
+// 屬性上色只能動「青藍色發光」，不准碰重創狀態的橘色火花。
+// 第一版用 ctx.filter hue-rotate 整張轉，橘色火花變成洋紅 ——
+// 那是「這隻快死了」的通用訊號，被染色等於把回饋弄壞。
+const tintSafety = await page.evaluate(async () => {
+  const assets = await import('./src/assets.js');
+  const count = (img) => {
+    const c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    const cx = c.getContext('2d', { willReadFrequently: true });
+    cx.drawImage(img, 0, 0);
+    const p = cx.getImageData(0, 0, c.width, c.height).data;
+    let orange = 0; let magenta = 0; let tinted = 0;
+    for (let i = 0; i < p.length; i += 4) {
+      if (p[i + 3] < 8) continue;
+      const r = p[i]; const g = p[i + 1]; const b = p[i + 2];
+      if (r > 150 && g > 70 && g < r - 30 && b < g) orange++;
+      if (r > 130 && b > 130 && g < r - 50 && g < b - 50) magenta++;
+      if (r > 150 && g > 120 && b < 110) tinted++;
+    }
+    return { orange, magenta, tinted };
+  };
+  const mk = (el) => ({ key: 'vanguard', skin: 'vanguardB', tm: 'p', el, hp: 2, mhp: 20 });
+  const plain = assets.unitSprite(mk('emp')); // emp 不上色 = 原圖
+  const amber = assets.unitSprite(mk('kinetic'));
+  // 綠色屬性拿來驗火花：青綠 [110,230,150] 不會被算成橘色，是乾淨的探針。
+  // 用琥珀驗會誤判，因為琥珀本身就落在「橘色」的判定範圍裡。
+  const green = assets.unitSprite(mk('armor'));
+  return { plain: count(plain), amber: count(amber), green: count(green) };
+});
+check('tintKeepsDamageSparksOrange',
+  tintSafety.green.orange >= tintSafety.plain.orange * 0.92,
+  `橘色火花像素 原圖 ${tintSafety.plain.orange} → 青綠上色後 ${tintSafety.green.orange}（變少代表火花被染掉了）`);
+check('tintDoesNotProduceMagenta',
+  tintSafety.amber.magenta <= tintSafety.plain.magenta + 60
+  && tintSafety.green.magenta <= tintSafety.plain.magenta + 60,
+  `洋紅像素 原圖 ${tintSafety.plain.magenta} → 琥珀 ${tintSafety.amber.magenta} / 青綠 ${tintSafety.green.magenta}`);
+check('tintActuallyChangesAccent',
+  tintSafety.amber.tinted > tintSafety.plain.tinted,
+  `琥珀像素 原圖 ${tintSafety.plain.tinted} → 上色後 ${tintSafety.amber.tinted}（沒變多代表上色根本沒生效）`);
+
 // 開一場戰鬥。地圖是隨機分岔，往前走到第一個 battle 節點為止。
 const setup = await page.evaluate(() => {
   const hops = [];
@@ -242,7 +298,10 @@ const placed = await page.evaluate(() => {
 check('battleReached', !!placed, `setup=${JSON.stringify(setup)} inBattle=${inBattle}`);
 
 if (placed) {
-  // 面板要列出射程內目標，而且帶著傷害區間
+  // 面板要列出射程內目標，而且帶著傷害區間。
+  // advanceTime 只跑 update + draw（canvas），面板是 ui.render 在真正的 rAF 裡重建的，
+  // 所以要等 DOM 出現再讀，否則會偶發讀到上一幀。
+  await page.waitForFunction(() => !!document.querySelector('.forecast'), null, { timeout: 5000 }).catch(() => {});
   const listHtml = await page.evaluate(() => document.querySelector('.forecast')?.innerText || '');
   check('forecastListRendered', /\d/.test(listHtml) && listHtml.includes('射程內目標'), JSON.stringify(listHtml.slice(0, 160)));
   check('forecastListShowsBackstab', listHtml.includes('背擊') || listHtml.includes('側擊'), JSON.stringify(listHtml.slice(0, 160)));

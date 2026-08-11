@@ -58,13 +58,89 @@ export function damageState(unit) {
   return 'critical';
 }
 
+// 底圖：skin 讓同一個原型可以有多套外觀（隨機幹員用），沒有 skin 就退回 key。
+// 分開兩個欄位是刻意的：key 是玩法身分（誰是狙擊），skin 只是長相，
+// 混在一起的話換張圖就會動到平衡與 AI 判斷。
+function baseSprite(unit) {
+  const base = unit.skin || unit.key;
+  const dmg = damageState(unit);
+  return state.units.get(`${base}-${dmg}`)
+    // 該階段缺圖時退到完好版，再不行退回原型，總比沒有好
+    ?? state.units.get(`${base}-intact`)
+    ?? state.units.get(`${unit.key}-${dmg}`)
+    ?? state.units.get(`${unit.key}-intact`)
+    ?? null;
+}
+
+// 屬性配色。素材身上的青藍色發光條帶要換成屬性色。
+//
+// 第一版用 ctx.filter = 'hue-rotate()' 整張旋轉，兩個問題：
+//   1. 重創狀態的橘色火花被一起轉成洋紅 —— 那是「這隻快死了」的通用訊號，不能動
+//   2. CSS hue-rotate 是矩陣近似不是真的 HSL 旋轉，動能想要的琥珀色轉出來是青綠
+// 所以改成逐像素、只挑「明顯偏青藍」的像素換色，其他一律不碰。
+// 一個組合只算一次並快取，256x256 的成本可以忽略。
+const EL_TINT = {
+  kinetic: [255, 200, 90], // 琥珀
+  emp: null, // 素材本來就是青藍，不用動
+  armor: [110, 230, 150], // 青綠
+};
+
+const lookCache = new Map();
+
+// 判斷這個像素是不是「青藍色發光」：藍綠明顯高於紅，而且夠亮。
+// 槍鐵灰是去飽和的（r≈g≈b）所以不會中，橘色火花 r 最大也不會中。
+function isCyanGlow(r, g, b) {
+  return b > r + 40 && g > r + 20 && (b + g) / 2 > 90;
+}
+
+function composedSprite(unit, base) {
+  const tint = EL_TINT[unit.el];
+  if (!tint) return base;
+  const key = `${unit.skin || unit.key}|${damageState(unit)}|${unit.el}`;
+  const hit = lookCache.get(key);
+  if (hit) return hit;
+
+  // node 測試環境沒有 document，直接回底圖
+  if (typeof document === 'undefined') return base;
+  const c = document.createElement('canvas');
+  c.width = base.width;
+  c.height = base.height;
+  const cx = c.getContext('2d', { willReadFrequently: true });
+  if (!cx) return base;
+  cx.drawImage(base, 0, 0);
+
+  try {
+    const img = cx.getImageData(0, 0, c.width, c.height);
+    const p = img.data;
+    const [tr, tg, tb] = tint;
+    for (let i = 0; i < p.length; i += 4) {
+      if (p[i + 3] < 8) continue;
+      const r = p[i]; const g = p[i + 1]; const b = p[i + 2];
+      if (!isCyanGlow(r, g, b)) continue;
+      // 保留原本的明暗（發光有強弱），只換色相
+      const lum = (b + g) / 2 / 255;
+      p[i] = Math.min(255, Math.round(tr * lum));
+      p[i + 1] = Math.min(255, Math.round(tg * lum));
+      p[i + 2] = Math.min(255, Math.round(tb * lum));
+    }
+    cx.putImageData(img, 0, 0);
+  } catch {
+    return base; // 跨來源污染之類的，退回底圖就好
+  }
+
+  lookCache.set(key, c);
+  return c;
+}
+
 // 拿不到就回 null，呼叫端負責降級
 export function unitSprite(unit) {
   if (!unit?.key) return null;
-  const exact = state.units.get(`${unit.key}-${damageState(unit)}`);
-  if (exact) return exact;
-  // 該階段缺圖時退到完好版，總比沒有好
-  return state.units.get(`${unit.key}-intact`) ?? null;
+  const base = baseSprite(unit);
+  if (!base) return null;
+  // 只有我方幹員做個體化。敵人維持統一外觀是刻意的：
+  // 玩家要在半秒內判斷「那隻是什麼、打不打得動」，敵人長太多樣只會拖慢判讀。
+  if (unit.tm !== 'p') return base;
+  return composedSprite(unit, base);
 }
 
 export function uiSprite(name) {

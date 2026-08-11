@@ -156,6 +156,32 @@
       "prompt": "A tall portrait 2:3 science-fiction control panel background plate that fills the entire frame edge to edge. A dark brushed gunmetal surface with faint etched circuit traces, a very subtle large hexagonal mesh, thin horizontal seam lines and small recessed rivets along the outer margins. Heavy angular bracket corner reinforcements at all four corners, each with a faint thin cyan-blue emissive edge line. A narrow vertical cyan-blue accent strip running down the extreme left margin. The central eighty percent of the plate is intentionally very dark, flat, even and low contrast with almost no detail, because interface text will be placed directly on top of it",
       "image": "items/panel-backdrop.png",
       "generated_at": "2026-08-08T05:50:08.751Z"
+    },
+    {
+      "id": "sheet-player-squad-b",
+      "name": "我方小隊素材表 B（隨機幹員變體）",
+      "rows": 3,
+      "cols": 3,
+      "cells": [
+        [
+          "vanguardB-intact",
+          "vanguardB-damaged",
+          "vanguardB-critical"
+        ],
+        [
+          "sniperB-intact",
+          "sniperB-damaged",
+          "sniperB-critical"
+        ],
+        [
+          "engineerB-intact",
+          "engineerB-damaged",
+          "engineerB-critical"
+        ]
+      ],
+      "prompt": "A square 1:1 game asset sheet containing exactly 9 top-down military science-fiction infantry tokens, laid out in a clean 3 by 3 grid: 3 rows and 3 columns, with equal generous flat magenta gaps between every subject. No subject may touch, overlap or cast anything onto another. All 9 subjects are drawn at exactly the same scale, each one centred in its own invisible cell, each with a compact footprint that would fit inside a circle. Every figure is seen from STRAIGHT OVERHEAD: you see the top of the helmet, the tops of the shoulders and the weapon foreshortened flat against the body. Within each row the armour design, the colour scheme, the equipment and the silhouette are IDENTICAL - it is the exact same soldier three times - and ONLY the battle damage changes across the columns. Column 1 (left) = pristine, undamaged, fully intact armour. Column 2 (middle) = moderately damaged: armour plates dented and scorched black, one shoulder plate cracked open, a thin wisp of smoke. Column 3 (right) = critically damaged: armour shattered open, internal structural frame exposed, torn cabling hanging loose, sparks and glowing orange hot fractures. ROW 1 is a VANGUARD BREACHER assault trooper: bulky heavy frontline exosuit with a rounded riot-shield plate bolted onto the left shoulder, very thick angular pauldrons, a stubby drum-fed shotgun held across the chest, a wide horizontal cyan-blue glowing visor band across the helmet and cyan-blue trim on the shield plate. ROW 2 is a SNIPER SPOTTER marksman: slim lightweight low-profile recon suit, a long-barrelled precision rifle with a folded bipod extending forward past the head, a flat rectangular sensor plate mounted on the back instead of a cloak, and twin small cyan-blue glowing optic lenses. ROW 3 is an ENGINEER DRONE-HANDLER support trooper: medium-weight suit with a bulky cylindrical backpack canister and a folded launch rail, a compact submachine gun in one hand and a heavy clamp manipulator on the other side, a ring of small cyan-blue indicator lights around the canister.",
+      "image": "items/sheet-player-squad-b.png",
+      "generated_at": "2026-08-11T19:18:05.597Z"
     }
   ]
 }

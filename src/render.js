@@ -303,6 +303,8 @@ function drawUnits(ctx, g, cell, time) {
       ctx.lineWidth = u.boss ? 4 : 3;
       ctx.stroke();
 
+      drawIdentityMark(ctx, u, cx, cy, outerR, team);
+
       const s = outerR * 2 * (1 + pulse * 0.012);
       ctx.save();
       ctx.translate(cx, cy);
@@ -411,6 +413,42 @@ function drawUnits(ctx, g, cell, time) {
     // AP 數字已經被上面的點狀指示取代，這裡不再重複標
   }
 }
+
+// 個人識別標記：在陣營環下緣畫 1-4 段短弧，段數與粗細由 u.look 決定。
+//
+// 隨機幹員之後，場上可能同時有兩個「先鋒」——同樣的原型、同樣的素材，
+// 玩家分不出誰是誰。名字在面板上，但棋盤上沒有。
+//
+// 刻意畫在環上而不是貼在素材身上：貼圖要對齊 3D 造型，
+// 每套 skin 的肩膀位置都不一樣，對不準就會看起來像 bug；
+// 畫在環上永遠不會蓋到素材，而且跟血條、AP 點一樣是「機能性 UI」的一部分。
+// 位置固定在左側（不跟著朝向轉），這樣它才是穩定的身分標記而不是方向指示。
+// 上緣是 AP 點、下緣是血條、右上角是「已出手」、左上角是屬性徽章 ——
+// 正左方是這個代幣上唯一還空著的地方。
+function drawIdentityMark(ctx, u, cx, cy, outerR, team) {
+  if (u.tm !== 'p' || u.look == null) return;
+  const segs = 1 + (u.look % 4); // 1-4 段
+  const wide = (u.look >> 3) % 2 === 0; // 兩種粗細
+  const span = wide ? 0.20 : 0.12;
+  const gap = 0.08;
+  const total = segs * span + (segs - 1) * gap;
+  let a = Math.PI - total / 2; // 從正左方往上下對稱展開
+
+  ctx.save();
+  ctx.strokeStyle = team;
+  ctx.lineWidth = 5;
+  ctx.lineCap = 'butt';
+  for (let i = 0; i < segs; i++) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, outerR + 3.5, a, a + span);
+    ctx.stroke();
+    a += span + gap;
+  }
+  ctx.restore();
+}
+
+// 給 tools/look-sheet.mjs 用：同一份繪製邏輯，避免對照表畫的跟棋盤不一樣
+export const drawIdentityMarkForTest = drawIdentityMark;
 
 function drawRoleGlyph(ctx, u, cx, cy, r, tw) {
   const ink = 'rgba(220,235,245,.9)';
