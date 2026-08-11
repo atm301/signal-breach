@@ -7,6 +7,7 @@ import {
   selectUnit, spendSkillPoint, pickDraftCard, chooseEventOption, closeEvent,
   buyShopItem, leaveShop, chooseSupply, closeSupply, setFocus, finishRun,
   serializeState, log, queueDraft, closeVictory,
+  openRecruit, toggleRecruit, confirmRecruit, buyRepair,
 } from './engine.js';
 import { loadMeta, saveMeta, buyUpgrade, recordRun, resetMeta } from './meta.js';
 import { loadAssets, assetCount } from './assets.js';
@@ -150,14 +151,17 @@ const actions = {
     refreshTitleSave();
   },
 
-  // 開新出擊才清掉舊存檔
-  startRun() { clearRun(); newRun(); },
-  startDaily() { clearRun(); newRun(dailySeed()); },
+  // 開新出擊才清掉舊存檔。
+  // openRecruit 只掛在這三個「明確開新局」的動作上，不放進 newRun ——
+  // newRun 也被開機佔位與 toHub 呼叫，放進去會讓一進大廳就跳出編隊畫面。
+  startRun() { clearRun(); newRun(); openRecruit(g); },
+  startDaily() { clearRun(); newRun(dailySeed()); openRecruit(g); },
   startSeed() {
     const input = document.getElementById('seedInput');
     const value = (input?.value || '').trim();
     clearRun();
     newRun(value || undefined);
+    openRecruit(g);
   },
 
   buy(id) {
@@ -201,6 +205,21 @@ const actions = {
   },
   supplyClose() { closeSupply(g); },
   victoryClose() { closeVictory(g); },
+
+  recruit(id) {
+    const res = toggleRecruit(g, id);
+    if (!res.ok && res.reason) log(g, res.reason, true);
+    else playSfx('ui', 620);
+  },
+  recruitGo() {
+    const res = confirmRecruit(g);
+    if (!res.ok) { log(g, res.reason, true); return; }
+    playSfx('node');
+  },
+  repair(id) {
+    const res = buyRepair(g, id);
+    if (!res.ok) log(g, res.reason, true);
+  },
 };
 
 const ui = createUI(panelRoot, actions);

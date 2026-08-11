@@ -13,6 +13,7 @@ import {
   attackUnit, moveUnit, endPlayerTurn, runEnemyPhase, reachableTiles,
   damageOf, damageBreakdown, faceToward, dist, key, pickDraftCard, chooseEventOption, closeEvent,
   buyShopItem, leaveShop, chooseSupply, closeSupply, closeVictory,
+  repairOptions, buyRepair, setFocus,
 } from '../src/engine.js';
 import { META_UPGRADES, TUNE, FLOORS } from '../src/data.js';
 
@@ -178,6 +179,36 @@ function botShop(g) {
   leaveShop(g);
 }
 
+// 戰後修整。bot 的花錢順序要接近一個「還算會玩」的玩家，
+// 否則模擬出來的通關率是沒人達得到的地板值：
+// 命懸一線先補血 → 有餘裕再把錢投在最弱的那個人身上。
+function botRepair(g) {
+  let guard = 0;
+  while (guard++ < 10) {
+    const opts = repairOptions(g).filter((o) => o.ok);
+    if (!opts.length) break;
+
+    const hurt = hpRatio(g) < 0.6;
+    const patch = opts.find((o) => o.id === 'patch');
+    if (hurt && patch) { buyRepair(g, 'patch'); continue; }
+
+    // 沒受重傷就把錢存下來，只在明顯有剩的時候投資
+    const spare = g.credits - 60;
+    const invest = ['gun', 'servo', 'calibrate']
+      .map((id) => opts.find((o) => o.id === id))
+      .find((o) => o && o.cost <= spare);
+    if (invest) {
+      // 投資投在最弱的隊員身上（ATK 最低），focusUnit 讀的是 focusId
+      const weakest = g.squad.filter((u) => u.alive).sort((a, b) => a.atk - b.atk)[0];
+      if (weakest) setFocus(g, weakest.id);
+      buyRepair(g, invest.id);
+      continue;
+    }
+    if (patch) { buyRepair(g, 'patch'); continue; }
+    break;
+  }
+}
+
 function botSupply(g) {
   const sup = g.pending.supply;
   if (!sup) return;
@@ -217,7 +248,7 @@ function playRun(seed, meta) {
     switch (g.screen) {
       case 'map': if (!botChooseNode(g)) return { ...summarize(g), stuck: true }; break;
       case 'battle': botBattle(g); break;
-      case 'victory': closeVictory(g); break;
+      case 'victory': botRepair(g); closeVictory(g); break;
       case 'event': botEvent(g); break;
       case 'shop': botShop(g); break;
       case 'supply': botSupply(g); break;

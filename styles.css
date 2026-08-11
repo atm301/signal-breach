@@ -133,17 +133,17 @@ input { padding: 6px 8px; width: 100%; }
 .highlight.fail h2 { color: #ffb3c0; }
 
 /* 通關結算：要看起來像獎勵，不是像另一個表單 */
+/* 這裡曾經有一個 victoryIn 入場動畫。
+   面板是「整塊 innerHTML 重建」的架構，勝利畫面加了戰後修整之後
+   每買一次就重建一次 → 動畫從 opacity 0 重播，等於每點一次閃一下。
+   入場動畫和「畫面上有按鈕」這件事天生衝突，所以拿掉，
+   獎勵感交給配色與 .reward 那個大數字。 */
 .highlight.victory {
   border-color: #8fe0b0;
   background: linear-gradient(160deg, #143a2c 0%, #122b26 60%, #11242a 100%);
   box-shadow: 0 0 0 1px rgba(143, 224, 176, .25) inset, 0 6px 24px rgba(0, 0, 0, .35);
-  animation: victoryIn .28s ease-out;
 }
 .highlight.victory h2 { color: #b8ffd0; font-size: 17px; letter-spacing: 1px; }
-@keyframes victoryIn {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: none; }
-}
 .reward {
   margin: 10px 0 4px;
   text-align: center;
@@ -190,6 +190,20 @@ button.big { padding: 15px; font-size: 16px; font-weight: 800; letter-spacing: 2
 
 .turnstate { font-size: 13px; color: var(--ink); }
 .turnstate b { color: var(--ok); font-size: 15px; }
+
+/* 詞條標籤。正負用顏色分，掃名單時不必逐條讀字 */
+.traits { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 4px; }
+.trait {
+  font-size: 11px; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid currentColor; white-space: nowrap;
+}
+.trait.good { color: #8fffad; }
+.trait.bad { color: #ff9d9d; }
+
+/* 編隊：選中的候補要一眼看得出來，因為這是出擊前唯一的決策 */
+.item.recruit { cursor: pointer; }
+.item.recruit:hover { border-color: var(--p); }
+.hint.warn { color: #ffd980; }
 
 /* 射程內目標的傷害預測。手機沒有 hover，這張表是唯一能看到相剋/側背算式的地方 */
 .forecast {

@@ -2,10 +2,11 @@
 // 所以重繪不會弄丟 handler；靠 signature 比對避免每一幀都重建。
 
 import {
-  TREE, META_UPGRADES, NODE_TYPES, FLOORS, CREDITS, CREDITS_META, ELEMENTS, TUNE,
+  TREE, META_UPGRADES, NODE_TYPES, FLOORS, CREDITS, CREDITS_META, ELEMENTS, TUNE, TRAITS,
 } from './data.js';
 import {
   availableNodes, squadAlive, xpToNext, unitById, actableUnits, damageBreakdown, dist,
+  repairOptions,
 } from './engine.js';
 import { upgradeList } from './meta.js';
 import { playSfx } from './audio.js';
@@ -23,6 +24,13 @@ const elTag = (u) => {
 };
 // 穩定性是抽象數字，直接換算成「傷害會飄多少」玩家才有感
 const spreadPct = (u) => Math.round(TUNE.BASE_SPREAD * (1 - (u.stab ?? 60) / 100) * 100);
+
+// 詞條標籤。正負用顏色分，玩家掃過名單時不必逐條讀字
+const traitTags = (u) => (u.tr ?? []).map((id) => {
+  const t = TRAITS[id];
+  if (!t) return '';
+  return `<span class="trait ${t.good ? 'good' : 'bad'}" title="${esc(t.d)}">${t.good ? '＋' : '－'}${esc(t.n)}</span>`;
+}).join('');
 
 const btn = (act, label, opts = {}) => {
   const dis = opts.disabled ? ' disabled' : '';
@@ -60,7 +68,9 @@ export function createUI(root, actions) {
     g.focusId,
     g.currentNodeId,
     g.log.length,
-    g.squad.map((u) => `${u.hp}/${u.mhp}|${u.ap}|${u.attacked}|${u.lv}|${u.sp}|${u.atk}|${u.rg}|${u.path}|${Object.keys(u.ul).join('')}|${u.alive}`).join(';'),
+    // stab / map / rep 也要進來：戰後修整買了「校準瞄具」只動 stab，
+    // 少了它面板不會重畫，玩家會以為錢花掉但什麼都沒發生。
+    g.squad.map((u) => `${u.hp}/${u.mhp}|${u.ap}/${u.map}|${u.attacked}|${u.lv}|${u.sp}|${u.atk}|${u.rg}|${u.stab}|${u.path}|${Object.keys(u.ul).join('')}|${JSON.stringify(u.rep ?? 0)}|${u.alive}`).join(';'),
     // 位置與朝向要進 signature：傷害預測表會因為誰站哪、面朝哪而整張改寫，
     // 只比 HP/AP 的話，敵人移動完預測值是舊的 —— 那比沒有預測更糟。
     g.battle ? `${g.battle.turn}|${g.battle.phase}|${g.battle.selectedId}|${actableUnits(g).length}|${
@@ -71,6 +81,7 @@ export function createUI(root, actions) {
     g.pending.shop ? `s${g.pending.shop.items.map((i) => (i.sold ? 1 : 0)).join('')}` : '-',
     g.pending.supply ? `p${g.pending.supply.resolved ? 1 : 0}` : '-',
     g.pending.victory ? `v${g.pending.victory.credits}` : '-',
+    g.pending.recruit ? `r${g.pending.recruit.picked.join(',')}` : '-',
     g.result ? 'R' : '-',
   ].join('~');
 
@@ -93,6 +104,13 @@ function panelHtml(g, meta, opts) {
   if (g.screen === 'credits') return creditsPanel();
 
   const parts = [topBar(g, meta, opts)];
+
+  // 編隊還沒確認就不該看到地圖 —— 兩個都是「選擇」，同時出現只會讓玩家點錯
+  if (g.pending.recruit) {
+    parts.push(recruitPanel(g));
+    parts.push(logPanel(g));
+    return parts.join('');
+  }
 
   switch (g.screen) {
     case 'hub': parts.push(hubPanel(g, meta)); break;
@@ -345,6 +363,75 @@ function battlePanel(g) {
     </section>`;
 }
 
+// 出擊前的編隊。5 選 3。
+//
+// 這是整場出擊裡「資訊最完整、風險最低」的一次決策 ——
+// 你看得到所有數值與詞條，還沒有任何損失。Roguelike 的第一個選擇就該長這樣：
+// 不是賭運氣，是在五份已知的取捨裡選一組能互補的。
+function recruitPanel(g) {
+  const r = g.pending.recruit;
+  if (!r) return '';
+  const rows = g.recruits.map((u) => {
+    const on = r.picked.includes(u.id);
+    const idx = r.picked.indexOf(u.id);
+    return `
+      <div class="item recruit${on ? ' sel' : ''}" data-act="recruit:${u.id}">
+        <div class="item-head">
+          <b>${esc(u.n)}</b>
+          <span class="tag">${on ? `已編入 ${idx + 1}` : '候補'}</span>
+        </div>
+        <div class="item-body">
+          HP ${u.mhp} ｜ ATK ${u.atk} ｜ RG ${u.rg} ｜ AP ${u.map}<br>
+          ${elTag(u)} ｜ 穩定 ${u.stab}（傷害浮動 ±${spreadPct(u)}%）
+          <div class="traits">${traitTags(u)}</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  const n = r.picked.length;
+  const els = new Set(r.picked.map((id) => g.recruits.find((u) => u.id === id)?.el).filter(Boolean));
+  const warn = n === TUNE.SQUAD_SIZE && els.size < 2
+    ? '<p class="hint warn">整隊同屬性：碰到剋你的敵人會整場打不動，建議至少混兩系。</p>'
+    : '';
+
+  return `
+    <section class="highlight">
+      <h2>✦ 編隊出擊</h2>
+      <p class="hint">
+        每次出擊的幹員都是隨機生成：數值有浮動，而且固定帶一個正面與一個負面詞條。<br>
+        點名字加入或移除，選滿 <b>${TUNE.SQUAD_SIZE}</b> 人出發。屬性相剋是三系循環（動能→電磁→裝甲→動能）。
+      </p>
+      <div class="list">${rows}</div>
+      ${warn}
+      <div class="row1">
+        ${btn('recruitGo', n === TUNE.SQUAD_SIZE ? '確認編隊，出擊' : `還要選 ${TUNE.SQUAD_SIZE - n} 人`, {
+    disabled: n !== TUNE.SQUAD_SIZE, cls: 'primary big',
+  })}
+      </div>
+    </section>`;
+}
+
+// 戰後修整。信用點的用途從「只能在商店花」變成「每場都要決定現在補血還是留著變強」。
+function repairSection(g) {
+  const opts = repairOptions(g);
+  const rows = opts.map((o) => `
+      <div class="item${o.ok ? '' : ' down'}">
+        <div class="item-head">
+          <b>${esc(o.n)}</b>
+          <span class="tag">${o.cost} 點${o.max ? `・${o.used}/${o.max}` : ''}</span>
+        </div>
+        <div class="item-body">${esc(o.d)}　<span class="mut">→ ${esc(o.target)}</span></div>
+        ${btn(`repair:${o.id}`, o.ok ? '購買' : (o.reason || '無法購買'), { disabled: !o.ok })}
+      </div>`).join('');
+
+  return `
+    <section>
+      <h2>戰後修整（信用點 ${g.credits}）</h2>
+      <p class="hint">針對個人的項目會套用到小隊面板裡目前選定的幹員。</p>
+      <div class="list">${rows}</div>
+    </section>`;
+}
+
 // 射程內目標的傷害預測表。
 //
 // canvas 上滑過敵人會跳預測卡，但手機沒有 hover —— 少了這張表，
@@ -412,7 +499,8 @@ function victoryPanel(g) {
       <div class="list">${healRows}${recoverRows}</div>
       ${bonus}
       ${btn('victoryClose', v.isBoss ? '完成出擊' : '繼續推進', { cls: 'primary' })}
-    </section>`;
+    </section>
+    ${v.isBoss ? '' : repairSection(g)}`;
 }
 
 function draftPanel(g) {
@@ -553,6 +641,7 @@ function squadPanel(g) {
           ATK ${u.atk} ｜ RG ${u.rg} ｜ SP ${u.sp}<br>
           ${elTag(u)} ｜ 穩定 ${u.stab ?? 60}（傷害浮動 ±${spreadPct(u)}%）<br>
           XP ${u.xp}/${xpToNext(u.lv)}
+          <div class="traits">${traitTags(u)}</div>
         </div>
       </div>`;
   }).join('');

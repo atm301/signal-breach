@@ -88,6 +88,62 @@ check('faceTowardNormalized', Math.abs(Math.hypot(fu.faceX, fu.faceY) - 1) < 1e-
   && Math.abs(fu.faceX - 0.6) < 1e-9 && Math.abs(fu.faceY - 0.8) < 1e-9);
 check('flankOfSelfSafe', flankOf(mk({ x: 1, y: 1 }), mk({ x: 1, y: 1 })).mult === 1);
 
+// ---------------------------------------------------------------- 隨機幹員
+
+const { TRAITS, PLAYER_TEMPLATES } = await import('../src/data.js');
+
+// 7) 每名幹員固定一正一負，而且數值不能被抖到荒謬區間
+const pools = Array.from({ length: 40 }, (_, i) => createGame({ seed: `roll-${i}` }));
+const everyone = pools.flatMap((p) => p.recruits);
+check('recruitPoolSize', pools.every((p) => p.recruits.length === TUNE.RECRUIT_POOL));
+check('squadDefaultsFilled', pools.every((p) => p.squad.length === TUNE.SQUAD_SIZE));
+check('squadIsSubsetOfRecruits',
+  pools.every((p) => p.squad.every((u) => p.recruits.includes(u))),
+  '小隊必須跟候補是同一批物件，否則選人與戰鬥會變成兩套數值');
+check('everyoneHasOneGoodOneBad', everyone.every((u) => (
+  u.tr.length === 2 && TRAITS[u.tr[0]]?.good === 1 && TRAITS[u.tr[1]]?.good === 0
+)));
+check('statsStayInSaneRange', everyone.every((u) => (
+  u.mhp >= 6 && u.mhp <= 40 && u.atk >= 2 && u.atk <= 9
+  && u.rg >= 1 && u.rg <= TUNE.RG_CAP && u.stab >= 5 && u.stab <= 98
+  && u.map >= 2 && u.map <= TUNE.AP_CAP
+)), JSON.stringify(everyone.map((u) => [u.mhp, u.atk, u.rg, u.stab, u.map])
+  .filter(([hp, atk, rg, st, ap]) => hp < 6 || hp > 40 || atk < 2 || atk > 9
+    || rg < 1 || st < 5 || ap < 2).slice(0, 3)));
+check('recruitsAreActuallyRandom',
+  new Set(everyone.map((u) => `${u.n}|${u.mhp}|${u.stab}|${u.tr.join()}`)).size > everyone.length * 0.6,
+  '同樣的人重複太多次就不叫隨機');
+check('poolCoversAllElements',
+  pools.every((p) => new Set(p.recruits.map((u) => u.el)).size === PLAYER_TEMPLATES.length),
+  '候補一定要涵蓋三系，否則相剋系統可能整場失效');
+check('sameSeedSameRecruits',
+  JSON.stringify(createGame({ seed: 'fixed' }).recruits.map((u) => [u.n, u.mhp, u.tr]))
+  === JSON.stringify(createGame({ seed: 'fixed' }).recruits.map((u) => [u.n, u.mhp, u.tr])));
+
+// 8) 行為詞條要真的改傷害，不能只是顯示用的字
+const withTrait = (base, tr) => ({ ...base, tr });
+const backAtk = { x: 2, y: 3, atk: 6, stab: 100, el: 'kinetic', pass: [], tm: 'p', rg: 1, tr: [] };
+const backTgt = { x: 2, y: 2, atk: 6, hp: 20, mhp: 20, stab: 60, el: 'kinetic', pass: [], tm: 'e', faceX: 0, faceY: -1, tr: [] };
+const plain = damageBreakdown(g, backAtk, backTgt);
+check('traitFlankerRaisesFlank',
+  damageBreakdown(g, withTrait(backAtk, ['flanker', 'worn']), backTgt).flank > plain.flank);
+check('traitSkittishRaisesIncoming',
+  damageBreakdown(g, backAtk, withTrait(backTgt, ['veteran', 'skittish'])).mid > plain.mid);
+check('traitFinisherOnlyOnWounded', (() => {
+  const fin = withTrait(backAtk, ['finisher', 'worn']);
+  const full = damageBreakdown(g, fin, { ...backTgt, hp: 20, mhp: 20 });
+  const hurt = damageBreakdown(g, fin, { ...backTgt, hp: 8, mhp: 20 });
+  return hurt.mid > full.mid && full.mid === plain.mid;
+})());
+check('traitHesitantOnlyOnFullHp', (() => {
+  const hes = withTrait(backAtk, ['veteran', 'hesitant']);
+  const full = damageBreakdown(g, hes, { ...backTgt, hp: 20, mhp: 20 });
+  const hurt = damageBreakdown(g, hes, { ...backTgt, hp: 8, mhp: 20 });
+  return full.mid < plain.mid && hurt.mid === plain.mid;
+})());
+check('traitModsReported',
+  damageBreakdown(g, withTrait(backAtk, ['flanker', 'worn']), backTgt).traitMods.length > 0);
+
 // ---------------------------------------------------------------- 呈現層
 
 const { server, port } = await listen(0);
@@ -101,10 +157,51 @@ await page.goto(`http://127.0.0.1:${port}/index.html`, { waitUntil: 'domcontentl
 await page.waitForFunction(() => typeof window.test_run_full_flow === 'function', null, { timeout: 10000 });
 await page.waitForFunction(() => window.__assets && window.__assets().ready, null, { timeout: 15000 }).catch(() => {});
 
-// 開一場戰鬥。地圖是隨機分岔，往前走到第一個 battle 節點為止。
-const setup = await page.evaluate(() => {
+// 開新出擊 → 應該先跳出編隊畫面，而且在確認之前不能走地圖
+await page.evaluate(() => {
   window.game_actions.play();
   window.game_actions.startRun();
+});
+// 面板是在下一個 animation frame 才重繪的，這裡不等就會讀到上一幀的舊 HTML
+await page.waitForFunction(() => document.getElementById('panel').innerText.includes('編隊出擊'),
+  null, { timeout: 5000 }).catch(() => {});
+// 截圖要在確認編隊之前拍，確認之後這個畫面就沒了
+await page.screenshot({ path: path.join(outDir, 'recruit.png') });
+
+const recruitUi = await page.evaluate(() => {
+  const gg = window.__game();
+  const panel = document.getElementById('panel').innerText;
+  const first = gg.recruits[0].id;
+  const wasPicked = gg.pending.recruit.picked.includes(first);
+  window.game_actions.recruit(first); // 切換一次
+  const toggled = gg.pending.recruit.picked.includes(first) !== wasPicked;
+  // 人數不足時確認應該被擋下來
+  const blocked = gg.pending.recruit.picked.length !== 3
+    ? (window.game_actions.recruitGo(), !!window.__game().pending.recruit)
+    : true;
+  window.game_actions.recruit(first); // 還原
+  const okBefore = !!gg.pending.recruit;
+  window.game_actions.recruitGo();
+  return {
+    shown: panel.includes('編隊出擊'),
+    listsAllRecruits: gg.recruits.every((u) => panel.includes(u.n)),
+    showsTraits: panel.includes('＋') && panel.includes('－'),
+    toggled,
+    blocked,
+    okBefore,
+    cleared: !window.__game().pending.recruit,
+    squadMatches: window.__game().squad.length === 3,
+  };
+});
+check('recruitScreenShown', recruitUi.shown, JSON.stringify(recruitUi));
+check('recruitListsPool', recruitUi.listsAllRecruits);
+check('recruitShowsTraits', recruitUi.showsTraits);
+check('recruitToggles', recruitUi.toggled);
+check('recruitBlocksIncompleteSquad', recruitUi.blocked, '人數不足時不該讓玩家出擊');
+check('recruitConfirmClears', recruitUi.cleared && recruitUi.squadMatches);
+
+// 開一場戰鬥。地圖是隨機分岔，往前走到第一個 battle 節點為止。
+const setup = await page.evaluate(() => {
   const hops = [];
   for (let i = 0; i < 6; i++) {
     const gg = window.__game();
@@ -194,6 +291,82 @@ if (placed) {
     `fx=${dmgFx.snap?.value} hpLoss=${dmgFx.dealt} beforeHp=${dmgFx.before}`);
   check('damageFxTagged', !!dmgFx.snap && Array.isArray(dmgFx.snap.tags), JSON.stringify(dmgFx.snap?.tags));
   await page.screenshot({ path: path.join(outDir, 'damage-number.png') });
+
+  // 戰後修整：把敵人全部清掉逼出勝利畫面，然後真的買一次
+  const repair = await page.evaluate(() => {
+    const gg = window.__game();
+    // 上一步打死人就會冒出升級抽卡，抽卡沒選完棋盤是鎖住的（tapBoard 會回「請先完成升級抽卡」）
+    let guard = 0;
+    while (gg.pending.draft && guard++ < 6) {
+      window.game_actions.draft(gg.pending.draft.cards[0].id);
+    }
+    // 勝利判定藏在 attackUnit 裡，直接把敵人 alive 設 0 不會觸發結算。
+    // 所以留最後一隻 1 HP 貼在我方旁邊，走正常的攻擊流程收掉。
+    const foes = gg.battle.units.filter((u) => u.tm === 'e');
+    const last = foes[0];
+    for (const u of foes) if (u !== last) { u.hp = 0; u.alive = 0; }
+    const me = gg.battle.units.find((u) => u.alive && u.tm === 'p');
+    me.hp = Math.max(1, Math.floor(me.mhp * 0.4)); // 受傷才有東西可以修
+    me.ap = me.map; me.attacked = 0;
+    last.alive = 1; last.hp = 1;
+    // 相鄰空格：不能站到隊友身上，否則那一下 tapBoard 會變成「改選隊友」而不是攻擊
+    const taken = new Set(gg.battle.units.filter((u) => u.alive && u !== last).map((u) => `${u.x},${u.y}`));
+    const spot = [[0, -1], [0, 1], [-1, 0], [1, 0]]
+      .map(([dx, dy]) => ({ x: me.x + dx, y: me.y + dy }))
+      .find((p) => p.x >= 0 && p.x < 5 && p.y >= 0 && p.y < 5 && !taken.has(`${p.x},${p.y}`));
+    if (!spot) return { reached: false, screen: 'no-free-tile' };
+    last.x = spot.x; last.y = spot.y;
+    gg.battle.selectedId = me.id;
+    const tap = window.__debug.tapBoard(last.x, last.y);
+    if (gg.screen !== 'victory') {
+      return { reached: false, screen: gg.screen, hp: last.hp, tap, me: [me.x, me.y, me.rg, me.ap], spot };
+    }
+
+    gg.credits = 500;
+    const before = {
+      credits: gg.credits,
+      hp: gg.squad.map((u) => u.hp),
+      atk: window.__game().squad.find((u) => u.id === gg.focusId)?.atk,
+    };
+    const r1 = window.game_actions.repair('patch');
+    const healed = gg.squad.some((u, i) => u.hp > before.hp[i]);
+    const spent = gg.credits < before.credits;
+    // 全隊修復每場限一次，第二次必須被擋
+    const opts = window.__engineRepairOptions ? null : null;
+    window.game_actions.repair('patch');
+    const secondBlocked = gg.credits === before.credits - 45;
+    window.game_actions.repair('gun');
+    const focus = gg.squad.find((u) => u.id === gg.focusId);
+    return {
+      reached: true, healed, spent, secondBlocked,
+      atkRaised: focus.atk > before.atk,
+      creditsLeft: gg.credits, r1, opts,
+    };
+  });
+  check('victoryAfterClear', repair.reached, JSON.stringify(repair));
+  check('repairHeals', repair.healed, JSON.stringify(repair));
+  check('repairSpendsCredits', repair.spent, JSON.stringify(repair));
+  check('repairPatchCappedPerBattle', repair.secondBlocked,
+    `緊急修復每場只能買一次，否則消耗戰可以用錢買掉：${JSON.stringify(repair)}`);
+  check('repairUpgradesAtk', repair.atkRaised, JSON.stringify(repair));
+
+  // 買完之後勝利面板必須還看得見 ——
+  // 面板是整塊重建的，只要有入場動畫，每買一次就會從透明重播一次。
+  // 重建發生在下一個 animation frame，所以先等 DOM 真的出現再量。
+  await page.waitForFunction(() => !!document.querySelector('.highlight.victory'),
+    null, { timeout: 5000 }).catch(() => {});
+  const victoryStillVisible = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('.highlight.victory')][0];
+    if (!el) return { found: false };
+    const s = getComputedStyle(el);
+    const box = el.getBoundingClientRect();
+    return { found: true, opacity: Number(s.opacity), h: box.height, anim: s.animationName };
+  });
+  check('victoryPanelStaysVisibleAfterPurchase',
+    victoryStillVisible.found && victoryStillVisible.opacity === 1
+    && victoryStillVisible.h > 40 && victoryStillVisible.anim === 'none',
+    JSON.stringify(victoryStillVisible));
+  await page.screenshot({ path: path.join(outDir, 'repair.png') });
 }
 
 check('noConsoleErrors', errors.length === 0, errors.slice(0, 3).join(' | '));

@@ -37,11 +37,18 @@ export const TUNE = {
   // 傷害浮動：純亂數只是雜訊，配上「穩定性」才變成可以取捨的資源。
   // 浮動幅度 = BASE_SPREAD x (1 - stab/100)
   BASE_SPREAD: 0.45,
-  CRIT_CHANCE: 0.12, // 打背後時另外加成，見 damageBreakdown
-  CRIT_MULT: 1.5,
   // 相剋與側背讓玩家的期望傷害大幅上升（最高 1.35 x 1.45 = 1.96 倍），
   // 敵人血量要跟上，否則戰鬥會縮回 3 回合以下、通關率飆到 76%。
-  ENEMY_HP_MULT: 1.18,
+  ENEMY_HP_MULT: 1.23,
+
+  // ── 隨機幹員 ──────────────────────────────────────────
+  RECRUIT_POOL: 5, // 每次出擊抽這麼多名候補
+  SQUAD_SIZE: 3, // 從候補裡選這麼多人上場
+  ROLL_HP: 3, // 數值抖動幅度（±）
+  ROLL_STAB: 12,
+  FLANKER_BONUS: 0.2, // 「側翼專家」在側背時額外加的倍率
+  SKITTISH_PENALTY: 0.2, // 「怯戰」被側背時額外吃的倍率
+  FINISHER_BONUS: 0.25, // 「收割者」對殘血目標的加成
 };
 
 // ---------------------------------------------------------------- 屬性相剋
@@ -84,6 +91,47 @@ export const PLAYER_TEMPLATES = [
   { key: 'vanguard', r: 'V', n: '先鋒', hp: 18, atk: 5, rg: 1, ap: 3, el: 'kinetic', stab: 72 },
   { key: 'sniper', r: 'S', n: '狙擊', hp: 14, atk: 5, rg: 2, ap: 2, el: 'emp', stab: 38 },
   { key: 'engineer', r: 'E', n: '工兵', hp: 16, atk: 4, rg: 2, ap: 3, el: 'armor', stab: 60 },
+];
+
+// ---------------------------------------------------------------- 詞條
+//
+// 每名幹員固定一正一負。
+//
+// 負面詞條的設計準則是「逼你改變用法」，不是「單純比較弱」——
+// 這是《最後的咒語》隨機英雄好玩的原因：-1 AP 的傢伙你會把他當定點砲台，
+// 不會拿去繞後；手抖的狙擊手你會讓他打大目標而不是收殘血。
+// 如果負面詞條只是數值扣一點，玩家的最佳解永遠是「重開直到抽到好的」。
+//
+// stat(u) 在生成當下改數值；behave 的詞條由 damageBreakdown 直接讀 u.tr。
+export const TRAITS = {
+  // ── 正面 ──
+  veteran: { n: '老兵', d: 'Max HP +4', good: 1, stat: (u) => { u.mhp += 4; } },
+  marksman: { n: '神槍手', d: 'ATK +1', good: 1, stat: (u) => { u.atk += 1; } },
+  steady: { n: '冷靜', d: '穩定性 +18（傷害更集中）', good: 1, stat: (u) => { u.stab += 18; } },
+  swift: { n: '迅捷', d: 'Max AP +1', good: 1, stat: (u) => { u.ap += 1; } },
+  scout: { n: '前哨', d: '射程 +1', good: 1, stat: (u) => { u.rg += 1; } },
+  flanker: { n: '側翼專家', d: '側擊與背擊的加成再 +20%', good: 1 },
+  breacher: { n: '破障', d: '無視目標的掩體', good: 1 },
+  finisher: { n: '收割者', d: '對 HP 低於一半的目標 +25%', good: 1 },
+
+  // ── 負面 ──
+  oldwound: { n: '舊傷', d: 'Max HP −4', good: 0, stat: (u) => { u.mhp -= 4; } },
+  worn: { n: '損耗', d: 'ATK −1', good: 0, stat: (u) => { u.atk -= 1; } },
+  jittery: { n: '手抖', d: '穩定性 −22（傷害更飄）', good: 0, stat: (u) => { u.stab -= 22; } },
+  sluggish: { n: '遲緩', d: 'Max AP −1', good: 0, stat: (u) => { u.ap -= 1; } },
+  nearsighted: { n: '近視', d: '射程 −1', good: 0, stat: (u) => { u.rg -= 1; } },
+  skittish: { n: '怯戰', d: '被側擊或背擊時額外多吃 20%', good: 0 },
+  exposed: { n: '暴露', d: '自己站掩體也沒有減傷', good: 0 },
+  hesitant: { n: '猶豫', d: '對滿血目標 −20%', good: 0 },
+};
+
+export const GOOD_TRAITS = Object.keys(TRAITS).filter((k) => TRAITS[k].good);
+export const BAD_TRAITS = Object.keys(TRAITS).filter((k) => !TRAITS[k].good);
+
+// 呼號。名字是玩家記住一名幹員的方式 ——「狙擊」記不住，「狙擊・鴉」記得住。
+export const CALLSIGNS = [
+  '鴉', '鐵砧', '長夜', '灰隼', '斷弦', '北斗', '銹釘', '雪盲', '子夜', '鋼齒',
+  '流火', '暗潮', '無名', '空號', '磷火', '短刀', '殘響', '白噪', '鏽刃', '零度',
 ];
 
 // 敵方原型。tier 決定出現在哪些節點：1=雜兵 2=中階

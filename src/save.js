@@ -37,6 +37,7 @@ export function serializeRun(g) {
     },
     currentNodeId: g.currentNodeId,
     squad: g.squad,
+    recruits: g.recruits ?? [],
     credits: g.credits,
     stats: g.stats,
     flags: g.flags,
@@ -51,6 +52,8 @@ export function serializeRun(g) {
       shop: g.pending.shop,
       supply: g.pending.supply,
       victory: g.pending.victory,
+      recruit: g.pending.recruit,
+      repair: g.pending.repair,
     },
     log: g.log.slice(-40),
   };
@@ -134,6 +137,7 @@ export function loadRun(meta) {
       map: { floors, nodes, startId: d.map.startId, bossId: d.map.bossId },
       currentNodeId: d.currentNodeId,
       squad: d.squad,
+      recruits: d.recruits ?? d.squad ?? [],
       credits: d.credits,
       stats: d.stats,
       flags: d.flags,
@@ -146,6 +150,8 @@ export function loadRun(meta) {
         shop: d.pending?.shop ?? null,
         supply: d.pending?.supply ?? null,
         victory: d.pending?.victory ?? null,
+        recruit: d.pending?.recruit ?? null,
+        repair: d.pending?.repair ?? null,
       },
       result: null,
       focusId: d.focusId,
@@ -153,6 +159,14 @@ export function loadRun(meta) {
       fxQueue: [],
       sfxQueue: [],
     };
+
+    // recruits 與 squad 在記憶體裡是同一批物件，JSON 來回會把它們拆成兩份。
+    // 不重新接起來的話，選人畫面顯示的血量會停在存檔當下，
+    // 而 squad 已經被戰鬥改過 —— 同一個人兩套數值。
+    {
+      const byId = new Map(g.squad.map((u) => [u.id, u]));
+      g.recruits = g.recruits.map((u) => byId.get(u.id) ?? u);
+    }
 
     // battle.units 裡的我方單位必須和 squad 是同一批物件，
     // 否則戰鬥中掉的血不會反映到隊伍上，讀檔後會出現兩套血量。

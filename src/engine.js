@@ -6,6 +6,7 @@ import {
   GRID, FLOORS, TUNE, ROLES, PLAYER_TEMPLATES, ENEMY_ARCHETYPES, BOSSES,
   TREE, PASS, CARDS, CARD_BY_ID, COVER_PATTERNS, EVENTS, SHOP_SERVICES,
   RARITY, coresEarned, elementMultiplier,
+  TRAITS, GOOD_TRAITS, BAD_TRAITS, CALLSIGNS,
 } from './data.js';
 import { makeRng, hashSeed, readableSeed } from './rng.js';
 import { generateValidMap } from './mapgen.js';
@@ -38,41 +39,70 @@ function metaLevel(meta, id) {
   return meta?.upgrades?.[id] ?? 0;
 }
 
-function buildSquad(meta) {
+// 抽一名幹員：原型 + 數值抖動 + 一正一負詞條 + 呼號。
+//
+// 抖動幅度刻意不對稱：HP 與穩定性可以隨便抖，ATK 不抖。
+// ATK 只有 4-5，±1 就是 20-25% 的傷害差，抽到 -1 的先鋒等於整場報廢，
+// 那不是「隨機性」，那是開場就決定輸贏。想改 ATK 的請走詞條（神槍手/損耗），
+// 那至少是玩家在候補名單上看得到、可以選擇避開的。
+export function rollOperative(rng, meta, template) {
   const hpBonus = metaLevel(meta, 'hp') * 2;
   const atkBonus = metaLevel(meta, 'atk') * 1;
   const apBonus = metaLevel(meta, 'ap') >= 1 ? 1 : 0;
+  const t = template;
 
-  return PLAYER_TEMPLATES
-    .map((t) => ({
-      id: uid(),
-      tm: 'p',
-      key: t.key,
-      r: t.r,
-      n: t.n,
-      mhp: t.hp + hpBonus,
-      hp: t.hp + hpBonus,
-      atk: t.atk + atkBonus,
-      rg: t.rg,
-      el: t.el,
-      stab: t.stab,
-      faceX: 0,
-      faceY: -1,
-      map: clamp(t.ap + apBonus, 1, TUNE.AP_CAP),
-      ap: 0,
-      lv: 1,
-      xp: 0,
-      sp: 0,
-      path: null,
-      pass: [],
-      ul: {},
-      alive: 1,
-      attacked: 0,
-      x: 0,
-      y: 0,
-      hurtMs: 0,
-      fireMs: 0,
-    }));
+  const u = {
+    id: uid(),
+    tm: 'p',
+    key: t.key,
+    r: t.r,
+    n: `${t.n}・${CALLSIGNS[rng.int(CALLSIGNS.length)]}`,
+    role: t.n,
+    mhp: t.hp + hpBonus + rng.int(TUNE.ROLL_HP * 2 + 1) - TUNE.ROLL_HP,
+    atk: t.atk + atkBonus,
+    rg: t.rg,
+    el: t.el,
+    stab: t.stab + rng.int(TUNE.ROLL_STAB * 2 + 1) - TUNE.ROLL_STAB,
+    ap: t.ap + apBonus,
+    tr: [],
+    faceX: 0,
+    faceY: -1,
+    lv: 1,
+    xp: 0,
+    sp: 0,
+    path: null,
+    pass: [],
+    ul: {},
+    alive: 1,
+    attacked: 0,
+    x: 0,
+    y: 0,
+    hurtMs: 0,
+    fireMs: 0,
+  };
+
+  const good = GOOD_TRAITS[rng.int(GOOD_TRAITS.length)];
+  const bad = BAD_TRAITS[rng.int(BAD_TRAITS.length)];
+  u.tr = [good, bad];
+  for (const id of u.tr) TRAITS[id].stat?.(u);
+
+  // 詞條與抖動疊起來可能把數值推到荒謬區間，最後統一夾一次
+  u.mhp = Math.max(6, u.mhp);
+  u.atk = Math.max(2, u.atk);
+  u.rg = clamp(u.rg, 1, TUNE.RG_CAP);
+  u.stab = clamp(u.stab, 5, 98);
+  u.map = clamp(u.ap, 2, TUNE.AP_CAP);
+  u.hp = u.mhp;
+  u.ap = 0;
+  return u;
+}
+
+// 候補名單。原型輪流出現（不是純隨機），確保 5 個候補一定涵蓋三種屬性，
+// 否則有機會抽到 5 個都是動能系 —— 相剋系統當場失效，那才是最壞的隨機。
+export function rollRecruits(rng, meta, n = TUNE.RECRUIT_POOL) {
+  return Array.from({ length: n }, (_, i) => (
+    rollOperative(rng, meta, PLAYER_TEMPLATES[i % PLAYER_TEMPLATES.length])
+  ));
 }
 
 export function createGame({ seed, meta = { upgrades: {} } } = {}) {
@@ -87,7 +117,11 @@ export function createGame({ seed, meta = { upgrades: {} } } = {}) {
     meta,
     map: generateValidMap(rng),
     currentNodeId: null,
-    squad: buildSquad(meta),
+    // 候補名單先抽好，squad 預設就是前 SQUAD_SIZE 名。
+    // 這樣模擬器與測試不必經過選人畫面也永遠拿得到一支合法小隊，
+    // 互動式選人只是「改寫 picked」，不是「squad 從無到有」。
+    recruits: [],
+    squad: [],
     credits: metaLevel(meta, 'credits') * 25,
     stats: { depth: 0, kills: 0, eliteKills: 0, battles: 0, turns: 0 },
     flags: {
@@ -97,7 +131,10 @@ export function createGame({ seed, meta = { upgrades: {} } } = {}) {
     },
     screen: 'map',
     battle: null,
-    pending: { draft: null, draftQueue: [], event: null, shop: null, supply: null, victory: null },
+    pending: {
+      draft: null, draftQueue: [], event: null, shop: null, supply: null,
+      victory: null, recruit: null, repair: null,
+    },
     result: null,
     focusId: null,
     log: [],
@@ -105,24 +142,77 @@ export function createGame({ seed, meta = { upgrades: {} } } = {}) {
     sfxQueue: [],
   };
 
+  g.recruits = rollRecruits(rng, meta);
+  g.squad = g.recruits.slice(0, TUNE.SQUAD_SIZE);
   g.focusId = g.squad[0]?.id ?? null;
   g.currentNodeId = g.map.startId;
   g.map.nodes[g.map.startId].visited = true;
   log(g, `登陸完成。種子 ${g.seedLabel}`, true);
 
-  // 老兵編制：全隊起始 Lv.2，各給一次抽卡
+  // 老兵編制：Lv.2 的數值直接給整份候補名單。
+  // 只給「目前這三個」的話，玩家換人之後加成就跟著錯亂 ——
+  // 這種只在特定操作順序下才會錯的 bug 最難抓，寧可在生成時就一次補齊。
   if (metaLevel(meta, 'veteran') >= 1) {
-    for (const u of g.squad) {
+    for (const u of g.recruits) {
       u.lv = 2;
       u.mhp += TUNE.LEVEL_HP_GAIN;
       u.hp += TUNE.LEVEL_HP_GAIN;
-      queueDraft(g, u.id, 'levelup');
     }
     log(g, '老兵編制生效：全隊以 Lv.2 出擊。', true);
   }
+  queueVeteranDrafts(g);
 
   log(g, '選擇一條推進路線。');
   return g;
+}
+
+// 老兵編制的免費抽卡只發給實際上場的三個人。換人之後要重發，
+// 否則抽卡會停在已經被換掉的幹員身上，整個流程卡死。
+function queueVeteranDrafts(g) {
+  if (metaLevel(g.meta, 'veteran') < 1) return;
+  g.pending.draftQueue = [];
+  g.pending.draft = null;
+  for (const u of g.squad) queueDraft(g, u.id, 'levelup');
+}
+
+// ---------------------------------------------------------------- 選人
+
+// 出擊前的選人。squad 已經預設是前三名，這裡只是讓玩家改寫選擇。
+export function toggleRecruit(g, id) {
+  if (!g.pending.recruit) return { ok: false, reason: '目前不在選人階段' };
+  const u = g.recruits.find((r) => r.id === id);
+  if (!u) return { ok: false, reason: '沒有這名幹員' };
+  const picked = g.pending.recruit.picked;
+  const at = picked.indexOf(id);
+  if (at >= 0) {
+    picked.splice(at, 1);
+    return { ok: true };
+  }
+  if (picked.length >= TUNE.SQUAD_SIZE) {
+    return { ok: false, reason: `最多只能帶 ${TUNE.SQUAD_SIZE} 人，先取消一個` };
+  }
+  picked.push(id);
+  return { ok: true };
+}
+
+export function confirmRecruit(g) {
+  const r = g.pending.recruit;
+  if (!r) return { ok: false, reason: '目前不在選人階段' };
+  if (r.picked.length !== TUNE.SQUAD_SIZE) {
+    return { ok: false, reason: `需要剛好 ${TUNE.SQUAD_SIZE} 名幹員` };
+  }
+  g.squad = r.picked.map((id) => g.recruits.find((u) => u.id === id)).filter(Boolean);
+  g.focusId = g.squad[0]?.id ?? null;
+  g.pending.recruit = null;
+  queueVeteranDrafts(g);
+  log(g, `編隊確認：${g.squad.map((u) => u.n).join('、')}。`, true);
+  return { ok: true };
+}
+
+// 開啟選人畫面（由 main.js 在開新 run 之後呼叫；模擬器不走這條）
+export function openRecruit(g) {
+  g.pending.recruit = { picked: g.squad.map((u) => u.id) };
+  return g.pending.recruit;
 }
 
 // 從目前節點可以走到哪幾個節點
@@ -327,20 +417,51 @@ export function flankOf(attacker, target) {
 
 // 一次算完所有修正，並回傳每一項，這樣 UI 才能把「為什麼是這個數字」攤開給玩家看。
 // 戰鬥預測（聖火降魔錄真正的發明）靠的就是這個函式。
+const hasTrait = (u, id) => !!u.tr?.includes(id);
+
 export function damageBreakdown(g, attacker, target) {
   const d = dist(attacker.x, attacker.y, target.x, target.y);
   const bonusMelee = d === 1 && attacker.pass.includes(PASS.A3) ? 1 : 0;
   const bonusRanged = d >= 2 && attacker.pass.includes(PASS.R5) ? 1 : 0;
 
   let cover = 0;
-  if (d >= 2 && g.battle?.cover.has(key(target.x, target.y)) && !attacker.pass.includes(PASS.A5)) {
+  const coverIgnored = attacker.pass.includes(PASS.A5) || hasTrait(attacker, 'breacher');
+  if (d >= 2 && g.battle?.cover.has(key(target.x, target.y))
+      && !coverIgnored && !hasTrait(target, 'exposed')) {
     cover = TUNE.COVER + (target.pass.includes(PASS.R4) ? 1 : 0);
   }
 
   const elem = elementMultiplier(attacker.el, target.el);
   const flank = flankOf(attacker, target);
+
+  // 詞條修正。全部走乘算並且各自記錄，戰鬥預測卡才列得出「為什麼是這個數字」。
+  let flankMult = flank.mult;
+  if (flank.label) {
+    if (hasTrait(attacker, 'flanker')) flankMult += TUNE.FLANKER_BONUS;
+    if (hasTrait(target, 'skittish')) flankMult += TUNE.SKITTISH_PENALTY;
+  }
+  const traitMods = [];
+  let traitMult = 1;
+  if (hasTrait(attacker, 'finisher') && target.hp <= target.mhp / 2) {
+    traitMult *= 1 + TUNE.FINISHER_BONUS;
+    traitMods.push({ n: TRAITS.finisher.n, m: 1 + TUNE.FINISHER_BONUS });
+  }
+  if (hasTrait(attacker, 'hesitant') && target.hp >= target.mhp) {
+    traitMult *= 0.8;
+    traitMods.push({ n: TRAITS.hesitant.n, m: 0.8 });
+  }
+  if (hasTrait(attacker, 'flanker') && flank.label) {
+    traitMods.push({ n: TRAITS.flanker.n, m: TUNE.FLANKER_BONUS });
+  }
+  if (hasTrait(target, 'skittish') && flank.label) {
+    traitMods.push({ n: TRAITS.skittish.n, m: TUNE.SKITTISH_PENALTY });
+  }
+  if (hasTrait(attacker, 'breacher') && d >= 2 && g.battle?.cover.has(key(target.x, target.y))) {
+    traitMods.push({ n: TRAITS.breacher.n, m: 1 });
+  }
+
   const raw = attacker.atk + bonusMelee + bonusRanged - cover;
-  const mid = Math.max(1, raw * elem * flank.mult);
+  const mid = Math.max(1, raw * elem * flankMult * traitMult);
 
   // 穩定性越高，區間越窄。stab 100 = 完全確定，stab 0 = 上下浮動 45%
   const stab = Math.max(0, Math.min(100, attacker.stab ?? 60));
@@ -355,8 +476,9 @@ export function damageBreakdown(g, attacker, target) {
     dist: d,
     cover,
     elem,
-    flank: flank.mult,
+    flank: flankMult,
     flankLabel: flank.label,
+    traitMods,
     spread,
     guaranteedKill: min >= target.hp,
     possibleKill: max >= target.hp,
@@ -892,6 +1014,128 @@ function onBattleWin(g) {
   g.screen = 'victory';
   sfx(g, 'victory');
   log(g, `敵人已肅清，取得 ${gain} 信用點。`, true);
+}
+
+// ---------------------------------------------------------------- 戰後修整
+//
+// 《最後的咒語》每一夜之間都有一段「修牆、換裝、分配資源」的喘息，
+// 那段才是玩家真正做長期決策的地方 —— 戰鬥只是驗收。
+// 這裡把同一個節拍放進勝利畫面：信用點在「現在補血」與「留著變強」之間二選一。
+//
+// 刻意不做成獨立畫面：多一個畫面就多一份存檔狀態與一次點擊，
+// 而這遊戲的節奏問題本來就是「點太多下」。
+// scope 決定「上限」記在誰身上：
+//   squad = 每場戰鬥限購 N 次（記在 pending.victory.bought）
+//   unit  = 每名幹員整場出擊限購 N 次（記在 u.rep）
+// 緊急修復第一版沒有上限，實測直接把通關率從 45.7% 推到 62.7% ——
+// 因為「消耗戰」這個設計支柱可以用錢買掉，補血變成無腦最優解。
+const REPAIRS = [
+  {
+    id: 'patch',
+    n: '緊急修復',
+    d: '全隊回復 30% Max HP',
+    cost: 45,
+    scope: 'squad',
+    max: 1,
+    can: (g) => squadAlive(g).some((u) => u.hp < u.mhp),
+    apply: (g) => {
+      for (const u of squadAlive(g)) {
+        u.hp = Math.min(u.mhp, u.hp + Math.max(1, Math.round(u.mhp * 0.3)));
+      }
+      return '全隊裝甲修復完成。';
+    },
+  },
+  {
+    id: 'calibrate',
+    n: '校準瞄具',
+    d: '選定幹員 穩定性 +8',
+    cost: 35,
+    scope: 'unit',
+    max: 3,
+    can: (g) => (focusUnit(g)?.stab ?? 99) < 95,
+    apply: (g) => {
+      const u = focusUnit(g);
+      u.stab = Math.min(95, u.stab + 8);
+      return `${u.n} 穩定性提升到 ${u.stab}。`;
+    },
+  },
+  {
+    id: 'gun',
+    n: '火力加裝',
+    d: '選定幹員 ATK +1',
+    cost: 110,
+    scope: 'unit',
+    max: 2,
+    apply: (g) => {
+      const u = focusUnit(g);
+      u.atk += 1;
+      return `${u.n} 火力提升到 ATK ${u.atk}。`;
+    },
+  },
+  {
+    id: 'servo',
+    n: '動力調校',
+    d: '選定幹員 Max AP +1',
+    cost: 200,
+    scope: 'unit',
+    max: 1, // AP 是這遊戲最強的數值，整場出擊只給一次
+    can: (g) => (focusUnit(g)?.map ?? TUNE.AP_CAP) < TUNE.AP_CAP,
+    apply: (g) => {
+      const u = focusUnit(g);
+      u.map = Math.min(TUNE.AP_CAP, u.map + 1);
+      return `${u.n} 動力調校完成，Max AP ${u.map}。`;
+    },
+  },
+];
+
+const repairUsed = (g, r) => (r.scope === 'squad'
+  ? (g.pending.victory?.bought?.[r.id] ?? 0)
+  : (focusUnit(g)?.rep?.[r.id] ?? 0));
+
+// 每次都重算，因為「買得起 / 還有沒有名額 / 有沒有意義」會隨著操作改變
+export function repairOptions(g) {
+  const u = focusUnit(g);
+  return REPAIRS.map((r) => {
+    const used = repairUsed(g, r);
+    const capped = used >= r.max;
+    const useless = r.can ? !r.can(g) : false;
+    return {
+      id: r.id,
+      n: r.n,
+      d: r.d,
+      cost: r.cost,
+      target: r.scope === 'squad' ? '全隊' : (u?.n ?? ''),
+      used,
+      max: r.max,
+      ok: !capped && !useless && g.credits >= r.cost,
+      reason: capped ? (r.scope === 'squad' ? '本場已修整過' : '已達上限')
+        : useless ? '目前買了也沒作用'
+          : g.credits < r.cost ? '信用點不足' : '',
+    };
+  });
+}
+
+export function buyRepair(g, id) {
+  if (!g.pending.victory) return { ok: false, reason: '現在不能修整' };
+  const opt = repairOptions(g).find((o) => o.id === id);
+  if (!opt) return { ok: false, reason: '沒有這個項目' };
+  if (!opt.ok) return { ok: false, reason: opt.reason || '無法購買' };
+
+  const def = REPAIRS.find((r) => r.id === id);
+  g.credits -= def.cost;
+  if (def.scope === 'squad') {
+    const v = g.pending.victory;
+    v.bought = v.bought || {};
+    v.bought[id] = (v.bought[id] ?? 0) + 1;
+  } else {
+    const u = focusUnit(g);
+    u.rep = u.rep || {};
+    u.rep[id] = (u.rep[id] ?? 0) + 1;
+  }
+  const msg = def.apply(g);
+  log(g, `戰後修整：${msg}（−${def.cost} 信用點）`, true);
+  sfx(g, 'ui', 700);
+  return { ok: true };
 }
 
 // 玩家按下「繼續推進」之後才真正離開戰場
