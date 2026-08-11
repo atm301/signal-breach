@@ -24,12 +24,14 @@ npm run sim            # 玩法評估器，跑 300 場，輸出勝率／深度�
 npm run sim:max        # 模擬永久升級點滿的老玩家
 npm run sim:long       # 跑 2000 場，數字比較穩
 npm test               # Playwright 整合測試（35 項斷言 + console error 檢查）
-npm run check          # sim + test 一起跑
+npm run check          # sim + test + audio + tactics 一起跑
+npm run check:tactics  # 戰術層 52 項：相剋／側背／區間／詞條／編隊／修整／上色
 npm run shots          # 各畫面截圖到 test-output/shots/，要人眼看
 npm run assets         # 重切素材表 + 重做 OG 圖
 npm run assets:review  # 素材接觸表（深色底），檢查去背與損傷遞進
 npm run check:audio    # 量各 BGM 段落實際輸出的 RMS，抓「有播但聽不到」
 npm run check:pacing   # 量真實牆鐘時間與操作次數，抓「玩起來拖」
+node tools/look-sheet.mjs   # 6 套外觀 x 3 屬性 x 3 損傷並排，人眼看變化夠不夠
 ```
 
 **改完任何數值都要跑 `npm run sim`。** 它會在指標跑出區間時 exit 1。
@@ -79,6 +81,18 @@ serve.mjs           零依賴靜態伺服器（開發 + 測試共用）
 - **AP 只用來移動。攻擊每回合限一次，且需保留 1 AP。**
   這條是刻意的，理由寫在 BALANCE.md 第 1 節。拿掉它戰鬥會退化成 2 回合互砍。
 - **掩體**對距離 >= 2 的攻擊減傷 1。近戰不受掩體影響。
+- **傷害是乘算鏈**：`(ATK − 掩體) × 相剋 × 側背 × 詞條`，再依穩定性展開成區間。
+  全部集中在 `damageBreakdown()` 一個函式裡，而且它會把每一項都回傳 ——
+  戰鬥預測卡靠這個把「為什麼是這個數字」攤給玩家看。
+  **新增任何傷害修正都要走這裡並加進回傳值**，不然玩家看不到就等於學不會。
+- **朝向是真的狀態**（`u.faceX` / `u.faceY`），不是視覺。移動與攻擊都會更新它，
+  被攻擊會轉頭面向攻擊者（所以繞後的優勢用一次就沒了）。
+  `render.js` 的 `facingOf()` **必須讀這兩個欄位**，畫出來的方向要跟判定用的是同一個。
+- **每次出擊的三名幹員是現抽的**：5 名候補選 3，數值有浮動、固定一正一負詞條。
+  `createGame` 一定會先自動選好前三名，所以模擬器與測試不經過選人畫面也拿得到合法小隊；
+  互動選人只是改寫 `pending.recruit.picked`。
+- **外觀走獨立亂數流 `lookRng`**。skin / look 不准抽在遊戲 `rng` 上 ——
+  加一套素材就會把整條隨機序列往後推，平衡數字跟著失真但完全看不出原因。
 - 畫面狀態機：`title` → `hub` → `map` → `battle` → `victory` → `map` ...，另有 `credits` / `event` / `shop` / `supply` / `result`。
 - 肅清全部敵人後會停在**通關結算畫面**（`screen === 'victory'`），按「繼續推進」才回地圖。
   加新畫面時記得同步教會 `tools/simulate.mjs` 的機器人，否則模擬器會卡住。
@@ -126,7 +140,24 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 2. `node scripts/codex-generate.mjs item <id>`
 3. `npm run assets` 切圖
 4. `npm run assets:review` **用眼睛看接觸表**，確認去背乾淨、同列尺寸一致、損傷遞進看得出來
-5. `npm test` 的 `unitSpritesLoaded` 斷言寫死了張數，加素材要同步改
+5. 我方新外觀還要加進 `PLAYER_TEMPLATES` 的 `skins` 陣列才會被抽到
+
+（`npm test` 的素材張數斷言已改成跟 `assets/manifest.json` 對數，不用再手動改。）
+
+### 我方幹員的三個外觀軸
+
+| 軸 | 怎麼來 | 影響 |
+|---|---|---|
+| skin | `PLAYER_TEMPLATES[].skins`，`lookRng` 抽 | 換整張素材（先鋒 A / 先鋒 B） |
+| 屬性配色 | `assets.js` 的 `EL_TINT`，逐像素只換「青藍發光」 | 動能琥珀 / 電磁青藍 / 裝甲青綠 |
+| 識別標記 | `render.js` 的 `drawIdentityMark`，由 `u.look` 決定 | 陣營環左側 1-4 段短弧 |
+
+⚠️ **屬性配色不要用 `ctx.filter = 'hue-rotate()'`。** 那會把重創狀態的橘色火花一起轉成洋紅
+（那是「這隻快死了」的通用訊號），而且 CSS hue-rotate 是矩陣近似，琥珀會轉成青綠。
+現在的做法是逐像素判斷 `isCyanGlow()` 再換色，一個組合只算一次並快取。
+
+⚠️ **識別標記畫在陣營環上，不要貼到素材身上。** 每套 skin 的肩膀位置都不一樣，
+貼圖對不準會看起來像 bug；畫在環上永遠不會蓋到素材。
 
 ⚠️ codex 生圖吃 ChatGPT Plus 的 rate limit，不是固定張數。`codex/data/quota.json` 設 20/天，
 同一週別再跑別的重活。
@@ -157,14 +188,17 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 | 加新敵人 | `src/data.js` 的 `ENEMY_ARCHETYPES`（記得設 `tier` 和 `w`） |
 | 加新卡片 | `src/data.js` 的 `CARDS` + `src/engine.js` 的 `applyCard` |
 | 加新事件 | `src/data.js` 的 `EVENTS`。效果型別看 `engine.js` 的 `applyEffects` |
-| 加新永久升級 | `src/data.js` 的 `META_UPGRADES` + `engine.js` 的 `buildSquad` / `createGame` |
+| 加新永久升級 | `src/data.js` 的 `META_UPGRADES` + `engine.js` 的 `rollOperative` / `createGame` |
+| 加新詞條 | `src/data.js` 的 `TRAITS`。純數值型寫 `stat(u)`；行為型要在 `damageBreakdown` 加分支並回報進 `traitMods` |
+| 改相剋 / 側背倍率 | `src/data.js` 的 `TUNE`，然後**一定要重跑 `npm run sim:max`**（乘數會連動總傷害曲線） |
+| 加戰後修整項目 | `src/engine.js` 的 `REPAIRS`。`scope: 'squad'` 記在 `pending.victory.bought`，`'unit'` 記在 `u.rep` |
 | 改敵方 AI | `src/engine.js` 的 `bestTarget` / `bestMove` / `actEnemy` |
 | 改畫面 | `src/render.js`（canvas）或 `src/ui.js`（面板） |
 | 改損傷階段門檻 | `src/assets.js` 的 `damageState`（目前 66% / 33%） |
 | 改音樂／音效 | `src/audio.js`。`SFX` 是音效配方表，`TRACKS` 是 5 首曲子，`MODES` 是段落強度 |
 | 改作者的話 | `src/data.js` 的 `CREDITS` / `CREDITS_META` |
 | 改存檔格式 | `src/save.js`。改結構要同步升 `VERSION`，舊存檔會自動作廢 |
-| 改單位朝向 | `src/render.js` 的 `facingOf` |
+| 改單位朝向 | `src/engine.js` 的 `faceToward`（機制）。`render.js` 的 `facingOf` 只是把它畫出來，不要在那裡自己算 |
 | 改敵方回合速度 | `src/main.js` 的 `AI_MOVE_MS` / `AI_ATTACK_MS`，然後跑 `npm run check:pacing` |
 | 換素材風格 | `codex/style-guide.md` 的 code block，然後全部重生 |
 
@@ -184,16 +218,29 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 - `window.__audio()` / `window.__assets()` — 音效與素材載入狀態
 - `window.test_run_full_flow()` — 跑完一段核心流程
 
+⚠️ **`window.advanceTime()` 只跑 `update` + `draw`（canvas），不會重建 DOM 面板。**
+面板是 `ui.render` 在真正的 requestAnimationFrame 裡重建的，所以測試改完 state 之後
+要讀面板 HTML 一律先 `page.waitForFunction(() => document.querySelector('...'))`。
+不等就會偶發讀到上一幀 —— 這個坑在 `check-tactics` 已經踩過三次（編隊面板、預測表、勝利面板）。
+
+⚠️ 打死人會冒出升級抽卡，**抽卡沒選完棋盤是鎖住的**（`tapBoard` 回「請先完成升級抽卡」）。
+測試裡連續操作棋盤前要先把 `pending.draft` 清掉。
+
 ---
 
 ## 已知待辦
 
 - 地板與棋盤背景還是程式畫的漸層，沒有接素材（刻意的：換掉會傷害格線可讀性，優先度低）
 - `index.html` 裡的網址是 `tactics.atmarketing.tw` 佔位，部署前要確認
-- 手機觸控可用但未針對小螢幕重新排版面板
-- 尚未做戰鬥動畫（單位移動是瞬移，沒有補間）
+- 手機觸控可用但未針對小螢幕重新排版面板（`.forecast` 目標表就是為了補手機沒有 hover 而做的）
+- 單位移動仍是瞬移，沒有補間；出手演出只有原地前撲／後座／後仰（刻意：一場才 4 回合，切鏡頭會把節奏吃光）
 - 作者的話的文案是 AI 代筆的初稿，等作者本人改
 - BGM 是程序合成的環境音，沒有記憶點強的主旋律
+- 敵人沒有隨機詞條，只有我方幹員有（刻意：敵人長太多樣會拖慢判讀）
+- 真正的零件疊層 paper-doll 沒做。俯視角下配件必須貼合 3D 造型，每套 skin 的肩膀位置不同，
+  要做的話得走「一張 sheet 含所有零件 + 每槽固定錨點 + 損傷用共用貼花疊層」
+- 一場 12 層是否該縮到 10 層還沒定案（實測：10 層是 5.2 場戰鬥，12 層是 6.0 場，
+  最高通關率 51.7%，不需要重調平衡）
 
 ---
 
