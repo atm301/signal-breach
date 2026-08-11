@@ -56,6 +56,21 @@ const ogOk = meta.ogImage ? await page.evaluate((url) => new Promise((resolve) =
   img.src = url;
 }), meta.ogImage) : { ok: false, w: 0, h: 0 };
 
+// 素材張數跟「線上那份 manifest」對數，不寫死數字。
+// 寫死的話每加一套素材就會紅一次，而那不是線上壞了，是斷言過期。
+// 要驗的是「manifest 上宣告的檔案有沒有真的全部載進來」——
+// 少一張就代表有檔案沒推上去或路徑錯了，那才是真正該擋下來的事。
+const liveManifest = await page.evaluate(async () => {
+  try {
+    const res = await fetch('assets/manifest.json', { cache: 'no-cache' });
+    if (!res.ok) return null;
+    const m = await res.json();
+    return {
+      units: m.units.length, icons: m.icons.length, ui: m.ui.length, props: m.props.length,
+    };
+  } catch { return null; }
+});
+
 await browser.close();
 
 // 本機環境連不出去的外部追蹤碼不算數
@@ -66,10 +81,11 @@ const realErrors = errors.filter((e) => !external(e));
 const checks = {
   頁面載入: screen !== null,
   開場為標題畫面: screen === 'title',
-  單位素材33: assets?.units === 33,
-  圖示素材8: assets?.icons === 8,
-  UI素材2: assets?.ui === 2,
-  道具素材6: assets?.props === 6,
+  讀得到manifest: liveManifest !== null,
+  單位素材全載入: !!liveManifest && assets?.units === liveManifest.units,
+  圖示素材全載入: !!liveManifest && assets?.icons === liveManifest.icons,
+  UI素材全載入: !!liveManifest && assets?.ui === liveManifest.ui,
+  道具素材全載入: !!liveManifest && assets?.props === liveManifest.props,
   能開始出擊: played.screen === 'battle',
   關卡樹完整: played.floors >= 12,
   OG圖可存取: ogOk.ok === true,
@@ -81,7 +97,7 @@ console.log(`\n網址        ${target}`);
 console.log(`標題        ${meta.title}`);
 console.log(`canonical   ${meta.canonical}`);
 console.log(`OG 圖       ${meta.ogImage}  → ${ogOk.ok ? `載入成功 ${ogOk.w}x${ogOk.h}` : '載入失敗'}`);
-console.log(`素材        units=${assets?.units} props=${assets?.props}`);
+console.log(`素材        units=${assets?.units}/${liveManifest?.units ?? '?'} props=${assets?.props}/${liveManifest?.props ?? '?'} icons=${assets?.icons}/${liveManifest?.icons ?? '?'} ui=${assets?.ui}/${liveManifest?.ui ?? '?'}`);
 console.log(`實際遊玩    畫面=${played.screen} 場上單位=${played.units} 節點數=${played.floors}`);
 if (realBad.length) console.log(`失敗請求    ${realBad.join('\n            ')}`);
 if (realErrors.length) console.log(`console錯誤 ${realErrors.join('\n            ')}`);
