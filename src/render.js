@@ -1,8 +1,10 @@
 // Canvas 繪製層。只讀 game state，不改它。
 // 戰鬥棋盤與關卡樹共用同一張 canvas，由 g.screen 決定畫哪一個。
 
-import { GRID, FLOORS, NODE_TYPES } from './data.js';
-import { key, dist, reachableTiles, aliveOf, unitById, availableNodes } from './engine.js';
+import { GRID, FLOORS, NODE_TYPES, ELEMENTS } from './data.js';
+import {
+  key, dist, reachableTiles, aliveOf, unitById, availableNodes, damageBreakdown,
+} from './engine.js';
 import { unitSprite, coverSprite, nodeIcon, uiSprite } from './assets.js';
 
 const PAD = 56;
@@ -141,7 +143,7 @@ export function pickMapNode(g, size, px, py) {
 
 // ---------------------------------------------------------------- 戰鬥棋盤
 
-export function renderBattle(ctx, g, size, time, fxList) {
+export function renderBattle(ctx, g, size, time, fxList, hoverTile) {
   const board = size - PAD * 2;
   const cell = board / GRID;
 
@@ -157,6 +159,7 @@ export function renderBattle(ctx, g, size, time, fxList) {
   drawHighlights(ctx, g, cell);
   drawUnits(ctx, g, cell, time);
   drawFx(ctx, fxList, cell);
+  drawForecast(ctx, g, cell, hoverTile);
 
   const b = g.battle;
   const typeLabel = b.nodeType === 'boss' ? '頭目戰' : b.nodeType === 'elite' ? '精英交戰' : '交火';
@@ -243,21 +246,17 @@ function drawHighlights(ctx, g, cell) {
   }
 }
 
-// 單位朝向：面向最近的敵人。
+// 單位朝向：直接讀引擎裡的 faceX / faceY。
 //
-// 素材是「面朝畫面下方」畫的，所以旋轉量 = 指向目標的角度 - PI/2。
-// 場上沒有敵人時，我方朝上（-PI）、敵方朝下（0），也就是雙方對峙的初始站姿。
-// 這是純函式，不改任何 state。
-function facingOf(g, u) {
-  const foes = aliveOf(g, u.tm === 'p' ? 'e' : 'p');
-  let best = null;
-  let bestD = Infinity;
-  for (const f of foes) {
-    const d = dist(u.x, u.y, f.x, f.y);
-    if (d < bestD) { bestD = d; best = f; }
-  }
-  if (!best) return u.tm === 'p' ? -Math.PI : 0;
-  return Math.atan2(best.y - u.y, best.x - u.x) - Math.PI / 2;
+// ⚠️ 這裡以前是「自己算出面向最近的敵人」，那只是視覺。
+// 現在側背攻擊是真的機制，畫出來的方向必須跟判定用的方向是同一個，
+// 否則玩家會看著背對自己的敵人卻吃不到背擊加成，完全無法學習。
+//
+// 素材是「面朝畫面下方」畫的，所以旋轉量 = 朝向角度 - PI/2。
+function facingOf(u) {
+  const fx = u.faceX ?? 0;
+  const fy = u.faceY ?? (u.tm === 'p' ? -1 : 1);
+  return Math.atan2(fy, fx) - Math.PI / 2;
 }
 
 function drawUnits(ctx, g, cell, time) {
@@ -271,6 +270,12 @@ function drawUnits(ctx, g, cell, time) {
     const pulse = 1 + Math.sin(tw * 3 + u.x * 0.9 + u.y * 0.6) * 0.04;
     const hurt = u.hurtMs > 0;
     const recoil = u.fireMs > 0 ? Math.sin((u.fireMs / 160) * Math.PI) * 0.1 : 0;
+    // 出手演出分兩種：近戰往前撲、遠程往後座。
+    // 這一格的位移只有 0.14 格，聖火降魔錄那種「切到動畫畫面」的排場放在
+    // 5x5 棋盤上會拖垮節奏（每場才 4 回合），所以改成原地演出 —— 保留衝擊感，不偷走時間。
+    const lunge = u.rg <= 1 ? recoil * cell * 1.4 : -recoil * cell * 0.9;
+    // 受擊往後仰：faceToward 已經把被打的人轉向攻擊者，所以往後 = 朝向的反方向
+    const knock = hurt ? Math.sin((u.hurtMs / 240) * Math.PI) * cell * 0.09 : 0;
     const team = u.tm === 'p' ? '#5db6ff' : u.boss ? '#ff5f7a' : '#ff8678';
     const glow = u.tm === 'p' ? 'rgba(93,182,255,.35)' : 'rgba(255,134,120,.35)';
 
@@ -301,9 +306,9 @@ function drawUnits(ctx, g, cell, time) {
       const s = outerR * 2 * (1 + pulse * 0.012);
       ctx.save();
       ctx.translate(cx, cy);
-      ctx.rotate(facingOf(g, u));
-      // 後座力沿著朝向的反方向推，所以是負的（旋轉後 +Y 是朝向目標）
-      ctx.translate(0, -recoil * r * 0.6);
+      ctx.rotate(facingOf(u));
+      // 旋轉後 +Y 就是朝向的正前方，所以往前撲是正的、後座與後仰是負的
+      ctx.translate(0, lunge - knock);
       ctx.drawImage(sprite, -s / 2, -s / 2, s, s);
       if (hurt) {
         // 受擊閃光：同一張圖用 lighter 疊上去提亮，不必另開 canvas 做 tint
@@ -370,6 +375,29 @@ function drawUnits(ctx, g, cell, time) {
       ctx.moveTo(mx - mr * 0.5, my);
       ctx.lineTo(mx + mr * 0.5, my);
       ctx.stroke();
+    }
+
+    // 屬性徽章。相剋是三系循環，玩家必須在「選誰打誰」的當下就看得到雙方屬性，
+    // 不然只能靠記憶回想哪隻是電磁 —— 那不叫戰略，那叫背書。
+    const el = ELEMENTS[u.el];
+    if (el) {
+      const er = cell * 0.095;
+      const ex = cx - outerR * 0.82;
+      const ey = cy - outerR * 0.78;
+      ctx.beginPath();
+      ctx.arc(ex, ey, er, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(9,17,23,.92)';
+      ctx.fill();
+      ctx.strokeStyle = el.color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = el.color;
+      ctx.font = `800 ${Math.round(er * 1.35)}px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(el.short, ex, ey + er * 0.06);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
     }
 
     // 血條
@@ -458,6 +486,41 @@ function drawFx(ctx, fxList, cell) {
       ctx.lineTo(x2, y2);
       ctx.stroke();
       ctx.restore();
+    } else if (f.type === 'damage') {
+      // 傷害數字：這是「戰略性」唯一的回饋管道。
+      // 玩家要能一眼看出「這下打 13 是因為背擊 + 剋」，
+      // 不然相剋跟側背都只是後台數字，學不會就等於不存在。
+      const cx = PAD + f.x * cell + cell * 0.5;
+      const big = Math.round(cell * (f.crit ? 0.34 : 0.27));
+      // 最上排的傷害數字會往上飄出棋盤、被頂端橫幅蓋掉。
+      // 夾住上緣，寧可讓它停在原地也不能讓玩家看不到自己打了多少。
+      const cy = Math.max(
+        38 + big * 0.6,
+        PAD + f.y * cell + cell * 0.5 - cell * 0.34 - (1 - t) * cell * 0.5,
+      );
+      ctx.save();
+      // 前 15% 淡入、最後 30% 淡出，中間全不透明，才讀得完
+      ctx.globalAlpha = Math.min(1, (1 - t) * 6.5, t * 3.3);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `900 ${big}px ${FONT}`;
+      ctx.lineWidth = Math.max(3, big * 0.22);
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(6,12,16,.92)';
+      const label = `-${f.value}`;
+      ctx.strokeText(label, cx, cy);
+      ctx.fillStyle = f.color || '#fff2d8';
+      ctx.fillText(label, cx, cy);
+      if (f.tags && f.tags.length) {
+        const small = Math.round(cell * 0.135);
+        ctx.font = `700 ${small}px ${FONT}`;
+        ctx.lineWidth = Math.max(2.5, small * 0.3);
+        const tagY = cy + big * 0.66;
+        ctx.strokeText(f.tags.join(' '), cx, tagY);
+        ctx.fillStyle = '#ffd980';
+        ctx.fillText(f.tags.join(' '), cx, tagY);
+      }
+      ctx.restore();
     } else {
       const cx = PAD + f.x * cell + cell * 0.5;
       const cy = PAD + f.y * cell + cell * 0.5;
@@ -478,6 +541,141 @@ function drawFx(ctx, fxList, cell) {
       ctx.restore();
     }
   }
+}
+
+// 戰鬥預測卡：滑過敵人時，把這一擊的完整算式攤開來。
+//
+// 火焰之紋章那套「切到全螢幕戰鬥動畫」在這裡行不通 —— 一場只有 4 回合，
+// 每次切鏡頭 2 秒就等於把節奏砍半。所以改走 Into the Breach 的路：
+// 資訊在出手「之前」就全部給你，動畫只留 350ms 原地演出。
+// 相剋和側背這種乘算機制，玩家看不到算式就學不會，學不會就等於沒有戰略。
+function drawForecast(ctx, g, cell, hoverTile) {
+  const b = g.battle;
+  if (!hoverTile || !b || b.phase !== 'player') return;
+  const me = unitById(g, b.selectedId);
+  if (!me || !me.alive || me.tm !== 'p') return;
+  const foe = b.units.find((u) => u.alive && u.tm === 'e' && u.x === hoverTile.x && u.y === hoverTile.y);
+  if (!foe) return;
+
+  const f = damageBreakdown(g, me, foe);
+  const inRange = f.dist <= me.rg;
+  const blocked = me.attacked >= 1 || me.ap < 1;
+
+  const rows = [];
+  if (f.elem !== 1) rows.push({ t: `${f.elem > 1 ? '屬性剋制' : '屬性被抗'} ×${f.elem}`, c: f.elem > 1 ? '#8fffad' : '#ff9d9d' });
+  if (f.flankLabel) rows.push({ t: `${f.flankLabel} ×${f.flank}`, c: '#ffd980' });
+  if (f.cover) rows.push({ t: `目標有掩體 −${f.cover}`, c: '#9fb8c8' });
+  rows.push({
+    t: `穩定性 ${me.stab ?? 60}｜目標 HP ${foe.hp}`,
+    c: '#9fb8c8',
+  });
+
+  const head = !inRange ? `射程外（距離 ${f.dist} / 射程 ${me.rg}）`
+    : blocked ? '本回合已出手'
+    : f.min === f.max ? `${f.min} 傷害` : `${f.min} – ${f.max} 傷害`;
+  const verdict = !inRange || blocked ? null
+    : f.guaranteedKill ? { t: '必殺', c: '#a8f5c0' }
+    : f.possibleKill ? { t: '可能擊殺', c: '#ffd980' }
+    : null;
+
+  const padX = cell * 0.16;
+  const headSize = Math.round(cell * 0.185);
+  const rowSize = Math.round(cell * 0.135);
+  const lineH = rowSize * 1.5;
+  const h = padX * 1.6 + headSize + rows.length * lineH;
+
+  ctx.save();
+  ctx.font = `800 ${headSize}px ${FONT}`;
+  // 標題與擊殺判定同一行，寬度要「量」不能猜 —— 猜了就會像第一版那樣把「可」字壓掉
+  const verdictFont = `800 ${Math.round(rowSize * 1.15)}px ${FONT}`;
+  let verdictW = 0;
+  if (verdict) {
+    ctx.font = verdictFont;
+    verdictW = ctx.measureText(verdict.t).width + padX;
+    ctx.font = `800 ${headSize}px ${FONT}`;
+  }
+  let w = ctx.measureText(head).width + verdictW;
+  ctx.font = `600 ${rowSize}px ${FONT}`;
+  for (const r of rows) w = Math.max(w, ctx.measureText(r.t).width);
+  w += padX * 2;
+
+  // 卡片位置：上 → 下 → 右 → 左依序試。
+  // 條件不只是「畫得下」，還要「不蓋住目標，也不蓋住自己的攻擊單位」——
+  // 第一版只做上下翻轉，結果目標在最上排時卡片翻下來正好蓋掉攻擊者，
+  // 玩家看得到算式卻看不到誰在打。
+  const cardW = w;
+  const boardEnd = PAD + GRID * cell;
+  const gap = cell * 0.12;
+  const cx = PAD + foe.x * cell + cell * 0.5;
+  const cyc = PAD + foe.y * cell + cell * 0.5;
+  const clampX = (v) => Math.max(4, Math.min(boardEnd + PAD - cardW - 4, v));
+  const clampY = (v) => Math.max(4, Math.min(boardEnd + PAD - h - 4, v));
+  const hits = (c, u) => {
+    const ox = PAD + u.x * cell; const oy = PAD + u.y * cell;
+    return c.x < ox + cell && c.x + cardW > ox && c.y < oy + cell && c.y + h > oy;
+  };
+  // 蓋掉目標或攻擊者是重罪（那兩格正是玩家在比較的東西），蓋到別的單位只是小扣分
+  const cost = (c) => b.units.reduce((s, u) => {
+    if (!u.alive || !hits(c, u)) return s;
+    return s + (u.id === foe.id || u.id === me.id ? 100 : 1);
+  }, 0);
+
+  const candidates = [
+    { x: clampX(cx - cardW / 2), y: PAD + foe.y * cell - h - gap },
+    { x: clampX(cx - cardW / 2), y: PAD + (foe.y + 1) * cell + gap },
+    { x: PAD + (foe.x + 1) * cell + gap, y: clampY(cyc - h / 2) },
+    { x: PAD + foe.x * cell - cardW - gap, y: clampY(cyc - h / 2) },
+  ].filter((c) => c.x >= 4 && c.y >= 4
+    && c.x + cardW <= boardEnd + PAD - 4 && c.y + h <= boardEnd + PAD - 4);
+
+  let pick = { x: clampX(cx - cardW / 2), y: clampY(cyc - h / 2) };
+  let bestCost = Infinity;
+  for (const c of candidates) {
+    const s = cost(c);
+    if (s < bestCost) { bestCost = s; pick = c; }
+    if (s === 0) break;
+  }
+  const x = pick.x;
+  const y = pick.y;
+
+  ctx.shadowBlur = 18;
+  ctx.shadowColor = 'rgba(0,0,0,.55)';
+  roundRect(ctx, x, y, w, h, 8);
+  ctx.fillStyle = 'rgba(10,20,27,.94)';
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = inRange && !blocked ? '#5db6ff' : '#5d6f7c';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  ctx.font = `800 ${headSize}px ${FONT}`;
+  ctx.fillStyle = inRange && !blocked ? '#fff2d8' : '#8fa3b0';
+  ctx.fillText(head, x + padX, y + padX * 0.8);
+  if (verdict) {
+    ctx.textAlign = 'right';
+    ctx.font = verdictFont;
+    ctx.fillStyle = verdict.c;
+    ctx.fillText(verdict.t, x + w - padX, y + padX * 0.8 + headSize * 0.18);
+    ctx.textAlign = 'left';
+  }
+  ctx.font = `600 ${rowSize}px ${FONT}`;
+  rows.forEach((r, i) => {
+    ctx.fillStyle = r.c;
+    ctx.fillText(r.t, x + padX, y + padX * 0.8 + headSize + i * lineH + lineH * 0.12);
+  });
+  ctx.restore();
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }
 
 // 把畫布座標換成棋盤格；點在棋盤外回傳 null

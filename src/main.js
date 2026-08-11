@@ -33,6 +33,7 @@ let meta = loadMeta();
 let g = null;
 let fxList = [];
 let hoverNodeId = null;
+let hoverTile = null;
 let aiAcc = 0;
 let resultRecorded = false;
 let lastFrame = performance.now();
@@ -234,10 +235,17 @@ canvas.addEventListener('click', (ev) => {
 });
 
 canvas.addEventListener('mousemove', (ev) => {
-  if (!g || g.screen !== 'map') { hoverNodeId = null; return; }
+  if (!g) { hoverNodeId = null; hoverTile = null; return; }
   const p = localPoint(ev);
-  hoverNodeId = pickMapNode(g, canvasSize(), p.x, p.y);
+  if (g.screen === 'map') {
+    hoverNodeId = pickMapNode(g, canvasSize(), p.x, p.y);
+    hoverTile = null;
+    return;
+  }
+  hoverNodeId = null;
+  hoverTile = g.screen === 'battle' ? pickBoardTile(canvasSize(), p.x, p.y) : null;
 });
+canvas.addEventListener('mouseleave', () => { hoverNodeId = null; hoverTile = null; });
 
 document.addEventListener('keydown', (ev) => {
   if (!g) return;
@@ -315,7 +323,7 @@ function draw(time) {
   const size = canvasSize();
   if (g.screen === 'title' || g.screen === 'credits') {
     renderTitle(ctx, size, time, { mode: g.screen, audioStarted: audioState().started });
-  } else if ((g.screen === 'battle' || g.screen === 'victory') && g.battle) renderBattle(ctx, g, size, time, fxList);
+  } else if ((g.screen === 'battle' || g.screen === 'victory') && g.battle) renderBattle(ctx, g, size, time, fxList, hoverTile);
   else if (g.screen === 'hub') renderIdle(ctx, g, size, '作戰基地');
   else if (g.screen === 'result') renderIdle(ctx, g, size, g.result?.won ? '出擊成功' : '出擊失敗');
   else renderMap(ctx, g, size, time, hoverNodeId);

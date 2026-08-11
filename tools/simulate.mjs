@@ -11,7 +11,7 @@
 import {
   createGame, enterNode, availableNodes, aliveOf, squadAlive,
   attackUnit, moveUnit, endPlayerTurn, runEnemyPhase, reachableTiles,
-  damageOf, dist, key, pickDraftCard, chooseEventOption, closeEvent,
+  damageOf, damageBreakdown, faceToward, dist, key, pickDraftCard, chooseEventOption, closeEvent,
   buyShopItem, leaveShop, chooseSupply, closeSupply, closeVictory,
 } from '../src/engine.js';
 import { META_UPGRADES, TUNE, FLOORS } from '../src/data.js';
@@ -49,6 +49,16 @@ function hpRatio(g) {
   return alive.reduce((s, u) => s + u.hp / u.mhp, 0) / alive.length;
 }
 
+// 假設站在 (x,y) 面向目標會打出多少（含相剋與側背）。借位後一定要還原。
+function projected(g, u, target, x, y) {
+  const ox = u.x; const oy = u.y; const ofx = u.faceX; const ofy = u.faceY;
+  u.x = x; u.y = y;
+  faceToward(u, target.x, target.y);
+  const b = damageBreakdown(g, u, target);
+  u.x = ox; u.y = oy; u.faceX = ofx; u.faceY = ofy;
+  return b;
+}
+
 function bestPlayerMove(g, u, foes) {
   const tiles = reachableTiles(g, u);
   if (!tiles.length) return null;
@@ -57,23 +67,23 @@ function bestPlayerMove(g, u, foes) {
   for (const tile of tiles) {
     const remaining = u.ap - tile.cost;
     let minDist = Infinity;
+    let bestDmg = 0;
     let canKill = false;
     for (const f of foes) {
       const d = dist(tile.x, tile.y, f.x, f.y);
       if (d < minDist) minDist = d;
       if (d <= u.rg && remaining >= 1) {
-        // damageOf 用的是實際座標，這裡先暫借位置估算
-        const ox = u.x; const oy = u.y;
-        u.x = tile.x; u.y = tile.y;
-        if (damageOf(g, u, f, d) >= f.hp) canKill = true;
-        u.x = ox; u.y = oy;
+        const b = projected(g, u, f, tile.x, tile.y);
+        if (b.mid > bestDmg) bestDmg = b.mid;
+        if (b.min >= f.hp) canKill = true; // 只認保證擊殺，不賭浮動
       }
     }
     const canShoot = minDist <= u.rg && remaining >= 1;
 
     let score = 0;
     if (canKill) score += 160;
-    if (canShoot) score += 90 + remaining * 5;
+    // 繞到相剋／側背吃得到加成的位置，值得多走幾步
+    if (canShoot) score += 90 + remaining * 5 + bestDmg * 4;
     score -= minDist * 4;
     if (g.battle.cover.has(key(tile.x, tile.y))) score += u.rg >= 2 ? 12 : 5;
     if (u.rg >= 2 && minDist <= 1) score -= 14; // 狙擊不想被貼身
@@ -90,9 +100,12 @@ function botActUnit(g, u) {
 
   const inRange = foes.filter((f) => dist(u.x, u.y, f.x, f.y) <= u.rg);
   if (inRange.length) {
-    // 能一擊收掉就優先收，否則打最脆的
-    const killable = inRange.filter((f) => damageOf(g, u, f, dist(u.x, u.y, f.x, f.y)) >= f.hp);
-    const target = (killable.length ? killable : inRange).sort((a, b) => a.hp - b.hp)[0];
+    // 優先順序：保證擊殺 > 有機會擊殺 > 打得最痛的（相剋與側背都算進去了）
+    const scored = inRange.map((f) => ({ f, b: damageBreakdown(g, u, f) }));
+    const sure = scored.filter((s) => s.b.min >= s.f.hp);
+    const maybe = scored.filter((s) => s.b.max >= s.f.hp);
+    const pool = sure.length ? sure : maybe.length ? maybe : scored;
+    const target = pool.sort((a, b) => b.b.mid - a.b.mid)[0].f;
     attackUnit(g, u, target);
     return true;
   }

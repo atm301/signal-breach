@@ -1,8 +1,12 @@
 // DOM 面板層。用「重建 innerHTML + 事件委派」的方式，
 // 所以重繪不會弄丟 handler；靠 signature 比對避免每一幀都重建。
 
-import { TREE, META_UPGRADES, NODE_TYPES, FLOORS, CREDITS, CREDITS_META } from './data.js';
-import { availableNodes, squadAlive, xpToNext, unitById, actableUnits } from './engine.js';
+import {
+  TREE, META_UPGRADES, NODE_TYPES, FLOORS, CREDITS, CREDITS_META, ELEMENTS, TUNE,
+} from './data.js';
+import {
+  availableNodes, squadAlive, xpToNext, unitById, actableUnits, damageBreakdown, dist,
+} from './engine.js';
 import { upgradeList } from './meta.js';
 import { playSfx } from './audio.js';
 import { nodeIconUrl } from './assets.js';
@@ -10,6 +14,15 @@ import { nodeIconUrl } from './assets.js';
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
 ));
+
+// 屬性用有顏色的字，跟棋盤上的屬性徽章同色，兩邊才對得起來
+const elTag = (u) => {
+  const e = ELEMENTS[u.el];
+  if (!e) return '屬性 —';
+  return `<span style="color:${e.color}">◈ ${esc(e.n)}</span>`;
+};
+// 穩定性是抽象數字，直接換算成「傷害會飄多少」玩家才有感
+const spreadPct = (u) => Math.round(TUNE.BASE_SPREAD * (1 - (u.stab ?? 60) / 100) * 100);
 
 const btn = (act, label, opts = {}) => {
   const dis = opts.disabled ? ' disabled' : '';
@@ -48,7 +61,11 @@ export function createUI(root, actions) {
     g.currentNodeId,
     g.log.length,
     g.squad.map((u) => `${u.hp}/${u.mhp}|${u.ap}|${u.attacked}|${u.lv}|${u.sp}|${u.atk}|${u.rg}|${u.path}|${Object.keys(u.ul).join('')}|${u.alive}`).join(';'),
-    g.battle ? `${g.battle.turn}|${g.battle.phase}|${g.battle.selectedId}|${g.battle.units.filter((u) => u.alive).length}|${actableUnits(g).length}` : '-',
+    // 位置與朝向要進 signature：傷害預測表會因為誰站哪、面朝哪而整張改寫，
+    // 只比 HP/AP 的話，敵人移動完預測值是舊的 —— 那比沒有預測更糟。
+    g.battle ? `${g.battle.turn}|${g.battle.phase}|${g.battle.selectedId}|${actableUnits(g).length}|${
+      g.battle.units.filter((u) => u.alive).map((u) => `${u.x},${u.y},${u.hp},${(u.faceX ?? 0).toFixed(1)},${(u.faceY ?? 0).toFixed(1)}`).join('/')
+    }` : '-',
     g.pending.draft ? `d${g.pending.draft.unitId}${g.pending.draft.cards.map((c) => c.id).join('')}` : '-',
     g.pending.event ? `e${g.pending.event.id}${g.pending.event.resolved ? 'r' : ''}` : '-',
     g.pending.shop ? `s${g.pending.shop.items.map((i) => (i.sold ? 1 : 0)).join('')}` : '-',
@@ -317,14 +334,47 @@ function battlePanel(g) {
       </div>
       <p class="hint turnstate">
         ${isPlayer ? `還能行動：<b>${pending}</b> / ${squadAlive(g).length}` : (b.phase === 'ai' ? '敵方行動中' : '結算中')}
-        ${sel ? `　｜　選定 ${esc(sel.n)}（AP ${sel.ap}/${sel.map}${sel.attacked ? '・已出手' : ''}）` : ''}
+        ${sel ? `　｜　選定 ${esc(sel.n)} ${elTag(sel)}（AP ${sel.ap}/${sel.map}${sel.attacked ? '・已出手' : ''}）` : ''}
       </p>
+      ${forecastList(g, sel, isPlayer)}
       <p class="hint">
         <b>點敵人就打，點空地就走</b>，不用先切模式。攻擊完會自動跳到下一個單位。<br>
         AP 只用來移動，攻擊每回合限一次且需保留 1 AP。單位右上角有橫槓 = 已出手。<br>
         Tab 切換單位，空白鍵或 E 結束回合，F 全螢幕
       </p>
     </section>`;
+}
+
+// 射程內目標的傷害預測表。
+//
+// canvas 上滑過敵人會跳預測卡，但手機沒有 hover —— 少了這張表，
+// 手機玩家永遠看不到相剋和側背的算式，等於玩的是另一款沒有戰略的遊戲。
+// 所以同一份資訊在面板再出一次，順便讓玩家可以「比較」而不只是「查詢」。
+function forecastList(g, sel, isPlayer) {
+  if (!isPlayer || !sel || !sel.alive) return '';
+  const foes = g.battle.units
+    .filter((u) => u.alive && u.tm === 'e' && dist(sel.x, sel.y, u.x, u.y) <= sel.rg)
+    .map((u) => ({ u, f: damageBreakdown(g, sel, u) }))
+    .sort((a, bb) => bb.f.mid - a.f.mid);
+  if (!foes.length) return '';
+
+  const blocked = sel.attacked >= 1 || sel.ap < 1;
+  const rows = foes.map(({ u, f }) => {
+    const tags = [
+      f.elem > 1 ? '<b style="color:#8fffad">剋</b>' : f.elem < 1 ? '<b style="color:#ff9d9d">抗</b>' : '',
+      f.flankLabel ? `<b style="color:#ffd980">${esc(f.flankLabel)}</b>` : '',
+      f.cover ? `<span style="color:#9fb8c8">掩體−${f.cover}</span>` : '',
+      f.guaranteedKill ? '<b style="color:#a8f5c0">必殺</b>' : f.possibleKill ? '<b style="color:#ffd980">可能擊殺</b>' : '',
+    ].filter(Boolean).join(' ');
+    const range = f.min === f.max ? `${f.min}` : `${f.min}–${f.max}`;
+    return `<div class="fc-row"><span class="fc-n">${esc(u.n)} ${elTag(u)}</span>`
+      + `<span class="fc-d">${range}</span>`
+      + `<span class="fc-t">HP ${u.hp} ${tags}</span></div>`;
+  }).join('');
+
+  return `<div class="forecast${blocked ? ' dim' : ''}">
+      <div class="fc-head">射程內目標${blocked ? '（本回合已出手）' : ''}</div>${rows}
+    </div>`;
 }
 
 // 打倒最後一個敵人是一場戰鬥的高潮。直接彈回地圖等於把那個瞬間吃掉，
@@ -501,6 +551,7 @@ function squadPanel(g) {
         <div class="item-body">
           ${pos}HP ${u.hp}/${u.mhp} ｜ AP ${u.ap}/${u.map} ${fired}<br>
           ATK ${u.atk} ｜ RG ${u.rg} ｜ SP ${u.sp}<br>
+          ${elTag(u)} ｜ 穩定 ${u.stab ?? 60}（傷害浮動 ±${spreadPct(u)}%）<br>
           XP ${u.xp}/${xpToNext(u.lv)}
         </div>
       </div>`;

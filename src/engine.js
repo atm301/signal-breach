@@ -5,7 +5,7 @@
 import {
   GRID, FLOORS, TUNE, ROLES, PLAYER_TEMPLATES, ENEMY_ARCHETYPES, BOSSES,
   TREE, PASS, CARDS, CARD_BY_ID, COVER_PATTERNS, EVENTS, SHOP_SERVICES,
-  RARITY, coresEarned,
+  RARITY, coresEarned, elementMultiplier,
 } from './data.js';
 import { makeRng, hashSeed, readableSeed } from './rng.js';
 import { generateValidMap } from './mapgen.js';
@@ -54,6 +54,10 @@ function buildSquad(meta) {
       hp: t.hp + hpBonus,
       atk: t.atk + atkBonus,
       rg: t.rg,
+      el: t.el,
+      stab: t.stab,
+      faceX: 0,
+      faceY: -1,
       map: clamp(t.ap + apBonus, 1, TUNE.AP_CAP),
       ap: 0,
       lv: 1,
@@ -206,7 +210,7 @@ function scaleFor(node) {
 function makeEnemy(g, archetype, scale, index) {
   const spawns = [[4, 0], [2, 0], [3, 1], [1, 0], [3, 0], [1, 1]];
   const [x, y] = spawns[index] || [index % GRID, 0];
-  const hp = Math.max(3, Math.round(archetype.hp * scale * (1 - g.flags.weaken)));
+  const hp = Math.max(3, Math.round(archetype.hp * scale * TUNE.ENEMY_HP_MULT * (1 - g.flags.weaken)));
   return {
     id: uid(),
     tm: 'e',
@@ -218,6 +222,10 @@ function makeEnemy(g, archetype, scale, index) {
     hp,
     atk: Math.max(1, Math.round(archetype.atk * (1 + (scale - 1) * TUNE.ENEMY_ATK_SCALE))),
     rg: archetype.rg,
+    el: archetype.el,
+    stab: archetype.stab ?? 60,
+    faceX: 0,
+    faceY: 1,
     map: archetype.ap,
     ap: archetype.ap,
     lv: 1,
@@ -256,6 +264,8 @@ export function startBattle(g, node) {
     u.y = GRID - 1;
     u.ap = u.map;
     u.attacked = 0;
+    u.faceX = 0;
+    u.faceY = -1;
   });
 
   g.battle = {
@@ -300,14 +310,79 @@ export function reachableTiles(g, u) {
   return out;
 }
 
-export function damageOf(g, attacker, target, d) {
+// 攻擊者站在目標的哪一面。
+// 朝向本來只是視覺，現在變成機制：位置從「距離」升級成「角度」，繞後成為真正的戰術。
+export function flankOf(attacker, target) {
+  const dx = attacker.x - target.x;
+  const dy = attacker.y - target.y;
+  const len = Math.hypot(dx, dy);
+  if (!len) return { mult: 1, label: null };
+  const fx = target.faceX ?? 0;
+  const fy = target.faceY ?? 1;
+  const dot = (dx / len) * fx + (dy / len) * fy; // 1 = 攻擊者在目標正前方，-1 = 正後方
+  if (dot >= 0.45) return { mult: 1, label: null };
+  if (dot <= -0.45) return { mult: TUNE.FLANK_BACK, label: '背擊' };
+  return { mult: TUNE.FLANK_SIDE, label: '側擊' };
+}
+
+// 一次算完所有修正，並回傳每一項，這樣 UI 才能把「為什麼是這個數字」攤開給玩家看。
+// 戰鬥預測（聖火降魔錄真正的發明）靠的就是這個函式。
+export function damageBreakdown(g, attacker, target) {
+  const d = dist(attacker.x, attacker.y, target.x, target.y);
   const bonusMelee = d === 1 && attacker.pass.includes(PASS.A3) ? 1 : 0;
   const bonusRanged = d >= 2 && attacker.pass.includes(PASS.R5) ? 1 : 0;
-  let reduction = 0;
-  if (d >= 2 && g.battle.cover.has(key(target.x, target.y)) && !attacker.pass.includes(PASS.A5)) {
-    reduction = TUNE.COVER + (target.pass.includes(PASS.R4) ? 1 : 0);
+
+  let cover = 0;
+  if (d >= 2 && g.battle?.cover.has(key(target.x, target.y)) && !attacker.pass.includes(PASS.A5)) {
+    cover = TUNE.COVER + (target.pass.includes(PASS.R4) ? 1 : 0);
   }
-  return Math.max(1, attacker.atk + bonusMelee + bonusRanged - reduction);
+
+  const elem = elementMultiplier(attacker.el, target.el);
+  const flank = flankOf(attacker, target);
+  const raw = attacker.atk + bonusMelee + bonusRanged - cover;
+  const mid = Math.max(1, raw * elem * flank.mult);
+
+  // 穩定性越高，區間越窄。stab 100 = 完全確定，stab 0 = 上下浮動 45%
+  const stab = Math.max(0, Math.min(100, attacker.stab ?? 60));
+  const spread = TUNE.BASE_SPREAD * (1 - stab / 100);
+  const min = Math.max(1, Math.round(mid * (1 - spread)));
+  const max = Math.max(min, Math.round(mid * (1 + spread)));
+
+  return {
+    min,
+    max,
+    mid: Math.round(mid),
+    dist: d,
+    cover,
+    elem,
+    flank: flank.mult,
+    flankLabel: flank.label,
+    spread,
+    guaranteedKill: min >= target.hp,
+    possibleKill: max >= target.hp,
+  };
+}
+
+// 給只需要單一數字的呼叫端（AI 評分、模擬器機器人）。回傳期望值。
+export function damageOf(g, attacker, target) {
+  return damageBreakdown(g, attacker, target).mid;
+}
+
+// 實際擲骰。用 g.rng 才能被種子重現，也才存得進存檔。
+export function rollDamage(g, attacker, target) {
+  const b = damageBreakdown(g, attacker, target);
+  const dmg = b.max <= b.min ? b.min : b.min + g.rng.int(b.max - b.min + 1);
+  return { ...b, dmg };
+}
+
+// 讓單位面向某個座標。移動與攻擊都會更新，所以「背對敵人」是玩家自己造成的後果。
+export function faceToward(u, x, y) {
+  const dx = x - u.x;
+  const dy = y - u.y;
+  const len = Math.hypot(dx, dy);
+  if (!len) return;
+  u.faceX = dx / len;
+  u.faceY = dy / len;
 }
 
 // ---------------------------------------------------------------- 戰鬥行動
@@ -328,6 +403,8 @@ export function moveUnit(g, u, x, y) {
   const cost = dist(u.x, u.y, x, y);
   if (cost < 1 || cost > u.ap) return { ok: false, reason: `移動距離需在 1 到 ${u.ap} 之間` };
 
+  // 先轉向再移動：朝向 = 移動方向。走過頭把背露給敵人，是玩家自己的選擇。
+  faceToward(u, x, y);
   u.x = x;
   u.y = y;
   u.ap -= cost;
@@ -349,9 +426,15 @@ export function attackUnit(g, attacker, target) {
   attacker.ap -= 1;
   attacker.attacked = (attacker.attacked || 0) + 1;
   attacker.fireMs = 160;
-  const dmg = damageOf(g, attacker, target, d);
+  faceToward(attacker, target.x, target.y);
+
+  const roll = rollDamage(g, attacker, target);
+  const dmg = roll.dmg;
   target.hp -= dmg;
   target.hurtMs = 240;
+  // 被打中就會轉頭面向攻擊者：這一擊的背擊優勢用掉之後就沒了，
+  // 不然一次繞後可以無限吃加成。
+  faceToward(target, attacker.x, attacker.y);
 
   fx(g, {
     type: 'beam',
@@ -361,9 +444,28 @@ export function attackUnit(g, attacker, target) {
     life: 140,
   });
   fx(g, { type: 'impact', x: target.x, y: target.y, color: '#fff2b7', life: 200, size: 1.2 });
+  // 傷害數字：玩家原本要去讀 log 才知道打了多少，這是最缺的一塊回饋
+  fx(g, {
+    type: 'damage',
+    x: target.x,
+    y: target.y,
+    value: dmg,
+    crit: roll.elem > 1 || roll.flank > 1,
+    tags: [
+      roll.elem > 1 ? '剋' : roll.elem < 1 ? '抗' : null,
+      roll.flankLabel,
+    ].filter(Boolean),
+    color: attacker.tm === 'p' ? '#ffe9a8' : '#ffb3ac',
+    life: 900,
+  });
   sfx(g, 'fire', attacker.rg >= 2 ? 780 : 430);
   sfx(g, 'hit', 320);
-  log(g, `${attacker.n} 攻擊 ${target.n}，造成 ${dmg} 點傷害。`);
+
+  const tags = [];
+  if (roll.elem > 1) tags.push('屬性剋制');
+  if (roll.elem < 1) tags.push('屬性被抗');
+  if (roll.flankLabel) tags.push(roll.flankLabel);
+  log(g, `${attacker.n} 攻擊 ${target.n}，造成 ${dmg} 點傷害${tags.length ? `（${tags.join('、')}）` : ''}。`);
 
   let killed = false;
   if (target.hp <= 0) {
@@ -596,11 +698,32 @@ function bestTarget(g, u, targets) {
   for (const t of targets) {
     const d = dist(u.x, u.y, t.x, t.y);
     const inRange = d <= u.rg ? 0 : 1;
-    // 越低血、越近、越打得到，分數越低（取最小）
-    const score = inRange * 100 + d * 2 + (t.hp / Math.max(1, t.mhp)) * 6;
+    // 直接用「這一擊實際會造成多少傷害」評分，AI 就會自動學會利用相剋與側背，
+    // 不用另外寫規則。分數取最小，所以傷害是負權重。
+    const dmg = damageBreakdown(g, u, t).mid;
+    const lethal = dmg >= t.hp ? -45 : 0;
+    const score = inRange * 100 + d * 2 + (t.hp / Math.max(1, t.mhp)) * 6 - dmg * 1.4 + lethal;
     if (!best || score < best.score) best = { t, score };
   }
   return best?.t ?? null;
+}
+
+// 假設站在 (x,y) 並面向目標，會打出多少傷害。
+// 借位計算後一定要還原，否則 AI 的評估會把單位真的移走。
+function projectedDamage(g, u, target, x, y) {
+  const ox = u.x;
+  const oy = u.y;
+  const ofx = u.faceX;
+  const ofy = u.faceY;
+  u.x = x;
+  u.y = y;
+  faceToward(u, target.x, target.y);
+  const dmg = damageBreakdown(g, u, target).mid;
+  u.x = ox;
+  u.y = oy;
+  u.faceX = ofx;
+  u.faceY = ofy;
+  return dmg;
 }
 
 function bestMove(g, u, targets) {
@@ -621,7 +744,12 @@ function bestMove(g, u, targets) {
     const canShoot = minDist <= u.rg && remaining >= 1;
 
     let score = 0;
-    if (canShoot) score += 100 + remaining * 6;
+    if (canShoot) {
+      score += 100 + remaining * 6;
+      // 同樣打得到的格子裡，優先選相剋／側背吃得到加成的那一格
+      const near = targets.reduce((p, c) => (dist(tile.x, tile.y, c.x, c.y) < dist(tile.x, tile.y, p.x, p.y) ? c : p));
+      score += projectedDamage(g, u, near, tile.x, tile.y) * 3;
+    }
     score -= minDist * 4;
     if (g.battle.cover.has(key(tile.x, tile.y))) score += pref === 'range' ? 10 : 4;
     if (pref === 'range' && minDist <= 1) score -= 18; // 狙擊/砲兵不想被貼身
@@ -1058,6 +1186,7 @@ export function serializeState(g) {
     x: u.x, y: u.y, hp: u.hp, maxHp: u.mhp, ap: u.ap, maxAp: u.map,
     atk: u.atk, range: u.rg, level: u.lv, xp: u.xp, xpToNext: xpToNext(u.lv),
     skillPoints: u.sp, path: u.path, passives: u.pass, alive: !!u.alive,
+    el: u.el, stab: u.stab, faceX: u.faceX, faceY: u.faceY,
   });
 
   return {

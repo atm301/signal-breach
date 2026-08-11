@@ -25,7 +25,43 @@ export const TUNE = {
   BOSS_SCALE: 1.15,
   DRAFT_SIZE: 3,
   TURN_LIMIT: 30, // 超過就強制撤退（判定為戰敗），避免龜縮與死局
+
+  // ── 戰術深度 ──────────────────────────────────────────
+  // 相剋：三系循環。剋制方吃滿，被剋方打折。
+  // 這是把「打最脆的」變成「誰該打誰」的最低成本做法。
+  ELEMENT_STRONG: 1.35,
+  ELEMENT_WEAK: 0.7,
+  // 側背：位置從「距離」升級成「角度」。朝向本來就已經在畫了，只是沒有機制意義。
+  FLANK_SIDE: 1.25,
+  FLANK_BACK: 1.45,
+  // 傷害浮動：純亂數只是雜訊，配上「穩定性」才變成可以取捨的資源。
+  // 浮動幅度 = BASE_SPREAD x (1 - stab/100)
+  BASE_SPREAD: 0.45,
+  CRIT_CHANCE: 0.12, // 打背後時另外加成，見 damageBreakdown
+  CRIT_MULT: 1.5,
+  // 相剋與側背讓玩家的期望傷害大幅上升（最高 1.35 x 1.45 = 1.96 倍），
+  // 敵人血量要跟上，否則戰鬥會縮回 3 回合以下、通關率飆到 76%。
+  ENEMY_HP_MULT: 1.18,
 };
+
+// ---------------------------------------------------------------- 屬性相剋
+
+// 三系循環：動能 → 電磁 → 裝甲 → 動能
+export const ELEMENTS = {
+  kinetic: { n: '動能', short: '動', beats: 'emp', color: '#ffd980' },
+  emp: { n: '電磁', short: '電', beats: 'armor', color: '#8fa4d8' },
+  armor: { n: '裝甲', short: '甲', beats: 'kinetic', color: '#71d993' },
+};
+
+export const ELEMENT_KEYS = Object.keys(ELEMENTS);
+
+// 攻擊方對防守方的相剋倍率
+export function elementMultiplier(atkEl, defEl) {
+  if (!atkEl || !defEl || atkEl === defEl) return 1;
+  if (ELEMENTS[atkEl]?.beats === defEl) return TUNE.ELEMENT_STRONG;
+  if (ELEMENTS[defEl]?.beats === atkEl) return TUNE.ELEMENT_WEAK;
+  return 1;
+}
 
 // ---------------------------------------------------------------- 角色
 
@@ -42,25 +78,27 @@ export const ROLES = {
 // 固定三人小隊。曾經把工兵設計成永久升級解鎖，但模擬顯示
 // 「2 人 → 3 人」等於行動經濟直接 +50%，會讓通關率從 0% 直接跳到 52%，
 // 整個難度曲線被一項升級綁架。永久升級應該給的是深度，不是行動次數。
+// stab（穩定性 0-100）刻意做出差異：狙擊期望值高但很不穩，重裝穩定但平庸。
+// 這樣「穩定性」才是可以取捨的資源，而不是一視同仁的雜訊。
 export const PLAYER_TEMPLATES = [
-  { key: 'vanguard', r: 'V', n: '先鋒', hp: 18, atk: 5, rg: 1, ap: 3 },
-  { key: 'sniper', r: 'S', n: '狙擊', hp: 14, atk: 4, rg: 2, ap: 2 },
-  { key: 'engineer', r: 'E', n: '工兵', hp: 16, atk: 4, rg: 2, ap: 3 },
+  { key: 'vanguard', r: 'V', n: '先鋒', hp: 18, atk: 5, rg: 1, ap: 3, el: 'kinetic', stab: 72 },
+  { key: 'sniper', r: 'S', n: '狙擊', hp: 14, atk: 5, rg: 2, ap: 2, el: 'emp', stab: 38 },
+  { key: 'engineer', r: 'E', n: '工兵', hp: 16, atk: 4, rg: 2, ap: 3, el: 'armor', stab: 60 },
 ];
 
 // 敵方原型。tier 決定出現在哪些節點：1=雜兵 2=中階
 export const ENEMY_ARCHETYPES = [
-  { key: 'grunt', r: 'V', n: '突擊兵', hp: 11, atk: 3, rg: 1, ap: 3, tier: 1, w: 40 },
-  { key: 'marksman', r: 'S', n: '射手', hp: 9, atk: 3, rg: 2, ap: 2, tier: 1, w: 32 },
-  { key: 'drone', r: 'D', n: '獵殺無人機', hp: 7, atk: 2, rg: 1, ap: 4, tier: 1, w: 22 },
-  { key: 'artillery', r: 'A', n: '迫擊砲組', hp: 10, atk: 4, rg: 3, ap: 1, tier: 2, w: 18 },
-  { key: 'brute', r: 'B', n: '重裝兵', hp: 20, atk: 5, rg: 1, ap: 2, tier: 2, w: 16 },
+  { key: 'grunt', r: 'V', n: '突擊兵', hp: 11, atk: 3, rg: 1, ap: 3, tier: 1, w: 40, el: 'kinetic', stab: 65 },
+  { key: 'marksman', r: 'S', n: '射手', hp: 9, atk: 3, rg: 2, ap: 2, tier: 1, w: 32, el: 'emp', stab: 55 },
+  { key: 'drone', r: 'D', n: '獵殺無人機', hp: 7, atk: 2, rg: 1, ap: 4, tier: 1, w: 22, el: 'emp', stab: 40 },
+  { key: 'artillery', r: 'A', n: '迫擊砲組', hp: 10, atk: 4, rg: 3, ap: 1, tier: 2, w: 18, el: 'kinetic', stab: 35 },
+  { key: 'brute', r: 'B', n: '重裝兵', hp: 20, atk: 5, rg: 1, ap: 2, tier: 2, w: 16, el: 'armor', stab: 78 },
 ];
 
 export const BOSSES = [
-  { key: 'commander', r: 'B', n: '指揮先鋒', hp: 40, atk: 7, rg: 1, ap: 3, boss: 1 },
-  { key: 'warden', r: 'A', n: '要塞守衛', hp: 36, atk: 6, rg: 3, ap: 2, boss: 1 },
-  { key: 'hunter', r: 'S', n: '首席獵手', hp: 34, atk: 6, rg: 3, ap: 3, boss: 1 },
+  { key: 'commander', r: 'B', n: '指揮先鋒', hp: 40, atk: 7, rg: 1, ap: 3, boss: 1, el: 'armor', stab: 80 },
+  { key: 'warden', r: 'A', n: '要塞守衛', hp: 36, atk: 6, rg: 3, ap: 2, boss: 1, el: 'kinetic', stab: 70 },
+  { key: 'hunter', r: 'S', n: '首席獵手', hp: 34, atk: 6, rg: 3, ap: 3, boss: 1, el: 'emp', stab: 50 },
 ];
 
 // ---------------------------------------------------------------- 技能樹

@@ -191,6 +191,28 @@ button.big { padding: 15px; font-size: 16px; font-weight: 800; letter-spacing: 2
 .turnstate { font-size: 13px; color: var(--ink); }
 .turnstate b { color: var(--ok); font-size: 15px; }
 
+/* 射程內目標的傷害預測。手機沒有 hover，這張表是唯一能看到相剋/側背算式的地方 */
+.forecast {
+  margin-top: 8px; border: 1px solid #2f4b5c; border-radius: 8px;
+  background: rgba(12, 24, 32, .6); overflow: hidden;
+}
+.forecast.dim { opacity: .5; }
+.fc-head {
+  font-size: 11px; letter-spacing: .08em; color: var(--mut);
+  padding: 5px 9px; background: rgba(255, 255, 255, .04);
+}
+.fc-row {
+  display: grid; grid-template-columns: 1fr auto; grid-template-areas: "n d" "t d";
+  gap: 0 10px; align-items: center; padding: 6px 9px;
+  border-top: 1px solid rgba(255, 255, 255, .06); font-size: 12px;
+}
+.fc-n { grid-area: n; color: var(--ink); }
+.fc-t { grid-area: t; color: var(--mut); font-size: 11px; }
+.fc-d {
+  grid-area: d; font-size: 17px; font-weight: 800; color: #ffe9a8;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
 /* 地圖清單裡的節點圖示 */
 .node-icon {
   width: 26px; height: 26px; vertical-align: -7px;
