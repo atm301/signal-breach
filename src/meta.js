@@ -10,6 +10,10 @@ export function emptyMeta() {
     cores: 0,
     upgrades: {},
     stats: { runs: 0, wins: 0, bestDepth: 0, totalKills: 0, totalCores: 0 },
+    // 教學預設開著：全新玩家的 runs 是 0。
+    // 老玩家的舊存檔沒有這個欄位，由 tutorial.js 的 tutorialOf() 依 runs 補上，
+    // 所以已經玩過的人不會突然被塞一堆提示。
+    tutorial: { on: true, seen: {} },
   };
 }
 
@@ -35,6 +39,9 @@ export function loadMeta(storage) {
       ...parsed,
       upgrades: { ...base.upgrades, ...(parsed.upgrades || {}) },
       stats: { ...base.stats, ...(parsed.stats || {}) },
+      // 舊存檔沒有 tutorial 欄位時留成 undefined，讓 tutorialOf() 依 runs 決定 ——
+      // 在這裡直接填 base 的 { on: true } 會害老玩家讀檔後被塞滿提示
+      tutorial: parsed.tutorial,
     };
   } catch {
     return emptyMeta();

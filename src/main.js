@@ -10,6 +10,7 @@ import {
   openRecruit, toggleRecruit, confirmRecruit, buyRepair, setDraftTarget, armSkill, cancelSkill,
 } from './engine.js';
 import { loadMeta, saveMeta, buyUpgrade, recordRun, resetMeta } from './meta.js';
+import { nextTip, markSeen, setTutorial, resetTutorial, tutorialProgress } from './tutorial.js';
 import { loadAssets, assetCount } from './assets.js';
 import {
   ensureAudio, playSfx, setMusicMode, toggleMusic, toggleSfx, audioState,
@@ -237,6 +238,29 @@ const actions = {
     const res = buyRepair(g, id);
     if (!res.ok) log(g, res.reason, true);
   },
+
+  // 教學提示。每一個動作都要立刻寫回 meta ——
+  // 不寫的話玩家關掉分頁再回來，看過的提示又全部跳一次。
+  tipOk(id) {
+    markSeen(meta, id);
+    saveMeta(meta);
+    ui.invalidate();
+  },
+  tipOff() {
+    setTutorial(meta, false);
+    saveMeta(meta);
+    ui.invalidate();
+  },
+  tutorialToggle() {
+    setTutorial(meta, !tutorialProgress(meta).on);
+    saveMeta(meta);
+    ui.invalidate();
+  },
+  tutorialReset() {
+    resetTutorial(meta);
+    saveMeta(meta);
+    ui.invalidate();
+  },
 };
 
 const ui = createUI(panelRoot, actions);
@@ -386,6 +410,7 @@ function frame(now) {
     ...audioState(),
     track: currentTrack()?.name ?? null,
     save: g.screen === 'title' ? titleSave : null,
+    tip: nextTip(g, meta),
   });
   hudRoot.innerHTML = hudHtml(g);
   requestAnimationFrame(frame);

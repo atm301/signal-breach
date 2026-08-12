@@ -10,6 +10,7 @@ import {
   repairOptions, skillsOf, skillState, skillCd,
 } from './engine.js';
 import { upgradeList } from './meta.js';
+import { tutorialProgress } from './tutorial.js';
 import { playSfx } from './audio.js';
 import { nodeIconUrl } from './assets.js';
 
@@ -98,7 +99,10 @@ export function createUI(root, actions) {
 
   return {
     render(g, meta, opts = {}) {
-      const sig = `${signature(g, meta)}~${opts.music}~${opts.sfx}~${opts.track}~${opts.save ? opts.save.savedAt : '-'}${opts.force ? Math.random() : ''}`;
+      // opts.tip 進 signature 是防禦性的：目前每個會換提示的路徑都有 invalidate()
+      // 或本來就會改到 state，所以拔掉它現階段也不會壞。
+      // 但「提示變了、面板沒重畫」是很難追的 bug，而這一行的成本是零。
+      const sig = `${signature(g, meta)}~${opts.music}~${opts.sfx}~${opts.track}~${opts.save ? opts.save.savedAt : '-'}~${opts.tip?.id ?? '-'}${opts.force ? Math.random() : ''}`;
       if (sig === lastSig) return;
       lastSig = sig;
       root.innerHTML = panelHtml(g, meta, opts);
@@ -115,6 +119,10 @@ function panelHtml(g, meta, opts) {
   if (g.screen === 'credits') return creditsPanel();
 
   const parts = [topBar(g, meta, opts)];
+
+  // 教學提示排在最上面：它講的一定是「你現在正在看的這個畫面」。
+  // 放在下面的話，玩家得先滑過整個面板才看得到說明，那就失去情境的意義了。
+  if (opts.tip) parts.push(tipPanel(opts.tip));
 
   // 編隊還沒確認就不該看到地圖 —— 兩個都是「選擇」，同時出現只會讓玩家點錯。
   // 但只在地圖畫面接管：不加 screen 判斷的話，回到大廳時編隊面板會蓋掉升級清單。
@@ -143,6 +151,19 @@ function panelHtml(g, meta, opts) {
   }
   parts.push(logPanel(g));
   return parts.join('');
+}
+
+// 情境教學卡。每條只出現一次，看過就不再打擾。
+function tipPanel(tip) {
+  return `
+    <section class="tip">
+      <div class="tip-head"><span class="tip-badge">教學</span><b>${esc(tip.t)}</b></div>
+      <ul class="tip-body">${tip.b.map((line) => `<li>${esc(line)}</li>`).join('')}</ul>
+      <div class="row2">
+        ${btn(`tipOk:${tip.id}`, '知道了', { cls: 'primary' })}
+        ${btn('tipOff', '關閉教學提示')}
+      </div>
+    </section>`;
 }
 
 function topBar(g, meta, opts) {
@@ -265,6 +286,7 @@ function creditsPanel() {
 // ---------------------------------------------------------------- 大廳
 
 function hubPanel(g, meta) {
+  const tut = tutorialProgress(meta);
   const list = upgradeList(meta).map((u) => {
     const label = u.maxed ? '已滿階' : `${u.cost} 碎片`;
     const canBuy = !u.maxed && meta.cores >= u.cost;
@@ -291,6 +313,12 @@ function hubPanel(g, meta) {
       <div class="seedrow">
         <input id="seedInput" type="text" placeholder="輸入種子（可選）" maxlength="24" autocomplete="off">
         ${btn('startSeed', '用這個種子出擊')}
+      </div>
+      <div class="row2">
+        ${btn('tutorialToggle', tut.on ? `教學提示 開（${tut.seen}/${tut.total}）` : '教學提示 關', {
+    cls: tut.on ? 'on' : '',
+  })}
+        ${btn('tutorialReset', '重看一次教學', { disabled: tut.seen === 0 })}
       </div>
     </section>
     <section>

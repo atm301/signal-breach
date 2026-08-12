@@ -25,8 +25,9 @@ npm run sim:max        # 模擬永久升級點滿的老玩家
 npm run sim:long       # 跑 2000 場，數字比較穩
 node tools/simulate.mjs --meta=max --drop=dualperk,augment   # 關掉指定永久升級，量單項貢獻
 npm test               # Playwright 整合測試（35 項斷言 + console error 檢查）
-npm run check          # sim + test + audio + tactics 一起跑
+npm run check          # sim + test + audio + tactics + tutorial 一起跑
 npm run check:tactics  # 戰術層 114 項：相剋／側背／區間／詞條／永久升級／編隊／修整／上色／敵方回合
+npm run check:tutorial # 教學提示 25 項：觸發時機／節奏／開關／已讀持久化
 npm run shots          # 各畫面截圖到 test-output/shots/，要人眼看
 npm run assets         # 重切素材表 + 重做 OG 圖
 npm run assets:review  # 素材接觸表（深色底），檢查去背與損傷遞進
@@ -56,6 +57,7 @@ src/
   assets.js         AI 素材載入 + 損傷階段判定。缺圖時優雅降級
   render.js         canvas 繪製（戰鬥棋盤 + 關卡樹）。只讀 state，不改
   ui.js             DOM 面板。重建 innerHTML + 事件委派，靠 signature 比對避免每幀重繪
+  tutorial.js       情境教學提示。純邏輯零 DOM，跟 engine 同一個規矩
   main.js           組裝：輸入、音效、主迴圈、meta 存檔、測試掛鉤
 assets/             ★ 上線用的素材（WebP + manifest）。切圖產物，不要手動編輯
 codex/              素材原始檔：prompt、風格指南、生成的大張素材表
@@ -187,6 +189,11 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 | `sft_run_v1` | 這一場出擊的完整狀態 | run 結束、放棄、開新出擊 |
 | `sft_audio_v1` | 音樂／音效開關 | 不清 |
 
+⚠️ **教學開關存在 `sft_meta_v1.tutorial`，而且舊存檔要留成 `undefined`。**
+`loadMeta` 不能用 `{ ...base, ...parsed }` 把 base 的 `{ on: true }` 補進去 ——
+那會讓打過幾十場的老玩家讀檔後突然被塞滿新手提示。
+缺欄位時由 `tutorialOf()` 依 `stats.runs` 決定：0 場才預設開。
+
 ⚠️ **`newRun()` 裡絕對不能呼叫 `clearRun()`。** 開機時會叫一次 `newRun()` 當佔位，
 在那裡清檔等於每次重新載入頁面都把存檔刪掉。清檔只放在真正「開新出擊」的 action 裡。
 
@@ -203,6 +210,7 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 | 加新主動技能 | `src/data.js` 的 `SKILLS`（cd / ap / target / attack）+ 掛進 `TREE` 某一階 + `engine.js` 的 `castSkill` 加一個 case。⚠️ 目標判定只能寫在 `validSkillTiles`，畫面高亮與實際施放共用它 |
 | 加新狀態效果 | `src/data.js` 的 `STATUS` + `damageBreakdown` 或對應 hook 讀 `hasStatus`；記得回報進 `traitMods` |
 | 加新的抽卡來源 | 對象固定（誰升級就是誰）用 `queueDraft`；對象該由玩家挑用 `queueChoiceDraft`。⚠️ 不要用 `focusUnit` 當獎勵對象，它預設永遠是 `squad[0]` |
+| 加教學提示 | `src/tutorial.js` 的 `TIPS`。⚠️ 三條規矩：①要講面板沒講的，抄一遍等於沒教學 ②用回合數錯開，同一回合最多跳一條 ③`check:tutorial` 會驗「每條都真的觸發得到」 |
 | 加新事件 | `src/data.js` 的 `EVENTS`。效果型別看 `engine.js` 的 `applyEffects` |
 | 加新永久升級 | `src/data.js` 的 `META_UPGRADES` + `engine.js` 的 `rollOperative` / `createGame` |
 | 加新詞條 | `src/data.js` 的 `TRAITS`（強度寫 `v`，整數型加 `int: 1`）。純數值型寫 `stat(u, v)`；行為型在對應 hook 讀 `traitV(u, id)`，傷害型還要回報進 `traitMods` |
