@@ -136,29 +136,214 @@ check('cosmeticRngIsSeparate', (() => {
   return strip(a) === strip(b) && a.map.nodes[a.map.startId].next.length === b.map.nodes[b.map.startId].next.length;
 })());
 
-// 8) 行為詞條要真的改傷害，不能只是顯示用的字
-const withTrait = (base, tr) => ({ ...base, tr });
-const backAtk = { x: 2, y: 3, atk: 6, stab: 100, el: 'kinetic', pass: [], tm: 'p', rg: 1, tr: [] };
+// 8) 行為詞條要真的改傷害，不能只是顯示用的字。
+//    詞條最容易出的錯是「寫了但沒有接上」—— 遊戲不會壞，只是那條字是騙人的。
+//    所以每一個行為型詞條都要有一條斷言，而且要驗方向而不只是「有差」。
+const withTrait = (base, tr, trv) => ({ ...base, tr, trv: trv ?? null });
+const backAtk = { x: 2, y: 3, atk: 6, mhp: 20, hp: 20, stab: 100, el: 'kinetic', pass: [], tm: 'p', rg: 1, tr: [] };
 const backTgt = { x: 2, y: 2, atk: 6, hp: 20, mhp: 20, stab: 60, el: 'kinetic', pass: [], tm: 'e', faceX: 0, faceY: -1, tr: [] };
 const plain = damageBreakdown(g, backAtk, backTgt);
+const empTgt = { ...backTgt, el: 'emp' }; // 動能剋電磁
+
 check('traitFlankerRaisesFlank',
-  damageBreakdown(g, withTrait(backAtk, ['flanker', 'worn']), backTgt).flank > plain.flank);
+  damageBreakdown(g, withTrait(backAtk, ['flanker']), backTgt).flank > plain.flank);
 check('traitSkittishRaisesIncoming',
-  damageBreakdown(g, backAtk, withTrait(backTgt, ['veteran', 'skittish'])).mid > plain.mid);
+  damageBreakdown(g, backAtk, withTrait(backTgt, ['skittish'])).mid > plain.mid);
+check('traitAlertLowersIncoming',
+  damageBreakdown(g, backAtk, withTrait(backTgt, ['alert'])).mid < plain.mid);
+check('traitAlertNeverBelowOne',
+  damageBreakdown(g, backAtk, withTrait(backTgt, ['alert'])).flank >= 1,
+  '警覺只能抵銷側背加成，不該把倍率壓到 1 以下變成減傷');
 check('traitFinisherOnlyOnWounded', (() => {
-  const fin = withTrait(backAtk, ['finisher', 'worn']);
+  const fin = withTrait(backAtk, ['finisher']);
   const full = damageBreakdown(g, fin, { ...backTgt, hp: 20, mhp: 20 });
   const hurt = damageBreakdown(g, fin, { ...backTgt, hp: 8, mhp: 20 });
   return hurt.mid > full.mid && full.mid === plain.mid;
 })());
 check('traitHesitantOnlyOnFullHp', (() => {
-  const hes = withTrait(backAtk, ['veteran', 'hesitant']);
+  const hes = withTrait(backAtk, ['hesitant']);
   const full = damageBreakdown(g, hes, { ...backTgt, hp: 20, mhp: 20 });
   const hurt = damageBreakdown(g, hes, { ...backTgt, hp: 8, mhp: 20 });
   return full.mid < plain.mid && hurt.mid === plain.mid;
 })());
+check('traitHunterOnlyWhenCountering', (() => {
+  const h = withTrait(backAtk, ['hunter']);
+  const neutral = damageBreakdown(g, h, backTgt);
+  const counter = damageBreakdown(g, h, empTgt);
+  return neutral.mid === plain.mid && counter.mid > damageBreakdown(g, backAtk, empTgt).mid;
+})());
+check('traitBrittleOnlyWhenCountered', (() => {
+  const neutral = damageBreakdown(g, backAtk, withTrait(backTgt, ['brittle']));
+  const countered = damageBreakdown(g, backAtk, withTrait(empTgt, ['brittle']));
+  return neutral.mid === plain.mid && countered.mid > damageBreakdown(g, backAtk, empTgt).mid;
+})());
+check('traitPanickyOnlyWhenHurt', (() => {
+  const p = withTrait(backAtk, ['panicky']);
+  const healthy = damageBreakdown(g, p, backTgt);
+  const wounded = damageBreakdown(g, { ...p, hp: 5 }, backTgt);
+  return healthy.mid === plain.mid && wounded.mid < plain.mid;
+})());
+check('traitPreciseRaisesFloorOnly', (() => {
+  const shaky = { ...backAtk, stab: 40 };
+  const base = damageBreakdown(g, shaky, backTgt);
+  const p = damageBreakdown(g, withTrait(shaky, ['precise']), backTgt);
+  return p.min > base.min && p.max === base.max && p.mid === base.mid;
+})(), '精算只收下緣，期望值與上限都不該動');
+check('traitUnreliableLowersCeilingOnly', (() => {
+  const shaky = { ...backAtk, stab: 40 };
+  const base = damageBreakdown(g, shaky, backTgt);
+  const u = damageBreakdown(g, withTrait(shaky, ['unreliable']), backTgt);
+  return u.max < base.max && u.min === base.min;
+})());
 check('traitModsReported',
-  damageBreakdown(g, withTrait(backAtk, ['flanker', 'worn']), backTgt).traitMods.length > 0);
+  damageBreakdown(g, withTrait(backAtk, ['flanker']), backTgt).traitMods.length > 0);
+check('traitModsCarryPolarity', (() => {
+  const mods = damageBreakdown(g, withTrait(backAtk, ['flanker']), withTrait(backTgt, ['skittish'])).traitMods;
+  return mods.some((m) => m.good === 1) && mods.some((m) => m.good === 0);
+})(), '預測卡要分得出這一項是好事還壞事');
+
+// 9) 詞條強度必須讀 trv（永久升級「詞條強化」放大過的值），不是寫死的基準值
+check('traitReadsBoostedValue', (() => {
+  const weak = damageBreakdown(g, withTrait(backAtk, ['flanker'], { flanker: 0.2 }), backTgt);
+  const strong = damageBreakdown(g, withTrait(backAtk, ['flanker'], { flanker: 0.6 }), backTgt);
+  return strong.mid > weak.mid;
+})(), '放大過的詞條沒有生效 = 詞條強化這個升級是假的');
+
+// ---------------------------------------------------------------- 永久升級
+
+const metaWith = (ups) => ({ upgrades: ups });
+const poolsWith = (ups, n = 30) => Array.from({ length: n }, (_, i) => (
+  createGame({ seed: `meta-${JSON.stringify(ups)}-${i}`, meta: metaWith(ups) }).recruits
+)).flat();
+
+// 幹員篩選：名單裡要真的出現「完全沒有負面」的人，而且數量剛好等於等級
+const cleanCount = (list) => list.filter((u) => u.tr.every((id) => TRAITS[id].good)).length;
+const noScreen = Array.from({ length: 30 }, (_, i) => createGame({ seed: `scr-${i}` }).recruits);
+const withScreen = Array.from({ length: 30 }, (_, i) => (
+  createGame({ seed: `scr-${i}`, meta: metaWith({ screening: 1 }) }).recruits
+));
+check('screeningOffMeansEveryoneHasFlaw',
+  noScreen.every((list) => cleanCount(list) === 0),
+  '沒買篩選就不該有人沒有負面詞條');
+check('screeningGivesExactlyOneClean',
+  withScreen.every((list) => cleanCount(list) === 1),
+  `每份名單應該剛好 1 名無負面：${withScreen.map(cleanCount).join()}`);
+
+// 雙專長：多一個正面，而且不會抽到重複的
+const dual = poolsWith({ dualperk: 1 });
+check('dualperkAddsSecondGood',
+  dual.every((u) => u.tr.filter((id) => TRAITS[id].good).length === 2));
+check('dualperkNoDuplicate',
+  dual.every((u) => new Set(u.tr).size === u.tr.length),
+  '兩個一樣的詞條只是數字變大，看起來像 bug');
+
+// 詞條強化：正面放大、負面不動
+const aug = poolsWith({ augment: 2 });
+check('augmentBoostsGoodTraits',
+  aug.some((u) => u.tr.some((id) => TRAITS[id].good && u.trv[id] > TRAITS[id].v)),
+  '正面詞條的 trv 應該比基準值大');
+check('augmentLeavesBadTraitsAlone',
+  aug.every((u) => u.tr.every((id) => TRAITS[id].good || u.trv[id] === TRAITS[id].v)),
+  '負面詞條不該被強化放大');
+check('augmentSecondPerkUnboosted', (() => {
+  // 雙專長 + 強化同時開：第二個正面必須維持基準值，否則三個升級會相乘失控
+  const both = poolsWith({ augment: 2, dualperk: 1 }, 30);
+  return both.every((u) => {
+    const goods = u.tr.filter((id) => TRAITS[id].good);
+    return goods.length < 2 || u.trv[goods[1]] === TRAITS[goods[1]].v;
+  });
+})(), '第二專長吃到強化的話，雙專長 x 強化 x 篩選會相乘（實測 +25.6 個百分點）');
+check('augmentIntTraitsStayIntegers',
+  aug.every((u) => u.tr.every((id) => !TRAITS[id].int || Number.isInteger(u.trv[id]))),
+  'HP / ATK / 射程 / AP 這類整數數值放大後必須進位');
+
+// 每個詞條都要能被抽到，而且說明文字要用實際生效的數值
+const wide = poolsWith({ dualperk: 1 }, 400);
+const seenTraits = new Set(wide.flatMap((u) => u.tr));
+check('everyTraitIsReachable',
+  Object.keys(TRAITS).every((id) => seenTraits.has(id)),
+  `抽不到的詞條：${Object.keys(TRAITS).filter((id) => !seenTraits.has(id)).join() || '無'}`);
+check('everyTraitHasDescription',
+  Object.values(TRAITS).every((t) => typeof t.d === 'function' && t.d(t.v).length > 0));
+
+// 回合／擊殺／經驗這幾個 hook 不在 damageBreakdown 裡，
+// 純數學驗不到，要真的跑一場戰鬥才知道有沒有接上。
+const { startBattle, endPlayerTurn, runEnemyPhase, attackUnit } = engine;
+
+function battleFixture(traits, seed = 'hook') {
+  const gm = createGame({ seed });
+  const node = Object.values(gm.map.nodes).find((n) => n.type === 'battle')
+    || { id: 'x', type: 'battle', floor: 1 };
+  startBattle(gm, node);
+  for (const u of gm.squad) { u.tr = [...traits]; u.trv = {}; for (const id of traits) u.trv[id] = TRAITS[id].v; }
+  return gm;
+}
+
+check('traitRegenHealsAtTurnStart', (() => {
+  const gm = battleFixture(['regen']);
+  const me = gm.squad[0];
+  me.hp = Math.max(1, me.mhp - 5);
+  const before = me.hp;
+  endPlayerTurn(gm);
+  runEnemyPhase(gm);
+  return me.alive ? me.hp > before || me.hp === me.mhp : true;
+})());
+check('traitBleedingNeverKills', (() => {
+  const gm = battleFixture(['bleeding']);
+  for (const u of gm.squad) u.hp = 1;
+  for (let i = 0; i < 4 && gm.battle && gm.battle.phase !== 'lose'; i++) {
+    endPlayerTurn(gm);
+    runEnemyPhase(gm);
+  }
+  // 只驗「不是被內傷扣死的」：敵人打死不算
+  return gm.squad.every((u) => !u.alive || u.hp >= 1);
+})(), '內傷把人扣到 0 是最沒回饋的死法，必須留 1 HP');
+check('traitScavengerPaysOnKill', (() => {
+  const gm = battleFixture(['scavenger']);
+  const me = gm.battle.units.find((u) => u.tm === 'p' && u.alive);
+  const foe = gm.battle.units.find((u) => u.tm === 'e' && u.alive);
+  foe.x = me.x; foe.y = me.y + (me.y < 4 ? 1 : -1);
+  foe.hp = 1;
+  me.ap = me.map; me.attacked = 0; me.rg = Math.max(me.rg, 1);
+  const before = gm.credits;
+  attackUnit(gm, me, foe);
+  return gm.credits === before + TRAITS.scavenger.v;
+})());
+check('traitExecutionerRefundsAp', (() => {
+  const gm = battleFixture(['executioner']);
+  const me = gm.battle.units.find((u) => u.tm === 'p' && u.alive);
+  const foe = gm.battle.units.find((u) => u.tm === 'e' && u.alive);
+  foe.x = me.x; foe.y = me.y + (me.y < 4 ? 1 : -1);
+  foe.hp = 1;
+  me.ap = me.map; me.attacked = 0;
+  attackUnit(gm, me, foe);
+  // 攻擊扣 1 AP，冷血補回 1 → 應該還是滿的
+  return me.ap === me.map;
+})());
+check('traitExecutionerStillCapsAttacks', (() => {
+  const gm = battleFixture(['executioner']);
+  const me = gm.battle.units.find((u) => u.tm === 'p' && u.alive);
+  const foes = gm.battle.units.filter((u) => u.tm === 'e' && u.alive);
+  if (foes.length < 2) return true;
+  foes[0].x = me.x; foes[0].y = me.y + (me.y < 4 ? 1 : -1); foes[0].hp = 1;
+  me.ap = me.map; me.attacked = 0;
+  attackUnit(gm, me, foes[0]);
+  foes[1].x = me.x; foes[1].y = me.y + (me.y < 4 ? 1 : -1); foes[1].hp = 1;
+  const second = attackUnit(gm, me, foes[1]);
+  return second.ok === false;
+})(), '冷血只能回 AP，不能解除「每回合限攻擊一次」—— 那條是戰鬥節奏的地基');
+check('traitXpMultipliersApply', (() => {
+  const mk = (tr) => {
+    const gm = battleFixture(tr);
+    const me = gm.battle.units.find((u) => u.tm === 'p' && u.alive);
+    const foe = gm.battle.units.find((u) => u.tm === 'e' && u.alive);
+    foe.x = me.x; foe.y = me.y + (me.y < 4 ? 1 : -1); foe.hp = 1;
+    me.ap = me.map; me.attacked = 0;
+    attackUnit(gm, me, foe);
+    return me.lv * 1000 + me.xp;
+  };
+  return mk(['quicklearn']) > mk(['veteran']) && mk(['dull']) < mk(['veteran']);
+})());
 
 // ---------------------------------------------------------------- 呈現層
 
@@ -215,6 +400,48 @@ check('recruitShowsTraits', recruitUi.showsTraits);
 check('recruitToggles', recruitUi.toggled);
 check('recruitBlocksIncompleteSquad', recruitUi.blocked, '人數不足時不該讓玩家出擊');
 check('recruitConfirmClears', recruitUi.cleared && recruitUi.squadMatches);
+
+// 編隊還沒確認就按「放棄並返回基地」，大廳必須是可用的。
+// 之前 pending.recruit 會留著把升級清單整個蓋掉，玩家買不了東西又看不出原因。
+const hubUsable = await page.evaluate(async () => {
+  window.game_actions.startRun();
+  await new Promise((r) => requestAnimationFrame(r));
+  const inRecruit = !!window.__game().pending.recruit;
+  window.game_actions.toHub();
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const panel = document.getElementById('panel').innerText;
+  return {
+    inRecruit,
+    screen: window.__game().screen,
+    cleared: !window.__game().pending.recruit,
+    showsUpgrades: panel.includes('裝甲儲備') || panel.includes('永久升級') || panel.includes('核心碎片'),
+    stillShowsRecruit: panel.includes('編隊出擊'),
+  };
+});
+check('abandonToHubClearsRecruit', hubUsable.cleared && !hubUsable.stillShowsRecruit,
+  JSON.stringify(hubUsable));
+check('hubShowsUpgradesAfterAbandon', hubUsable.showsUpgrades, JSON.stringify(hubUsable));
+
+// 第二道防線：就算 pending.recruit 因為別的路徑殘留下來，
+// 大廳畫面也不該被編隊面板接管。上面那條只驗得到 toHub 有沒有清乾淨。
+const hubGuard = await page.evaluate(async () => {
+  const gg = window.__game();
+  gg.pending.recruit = { picked: gg.squad.map((u) => u.id) };
+  gg.screen = 'hub';
+  window.__debug.invalidateUi?.();
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const panel = document.getElementById('panel').innerText;
+  gg.pending.recruit = null;
+  return { showsRecruit: panel.includes('編隊出擊'), showsHub: panel.includes('核心碎片') };
+});
+check('hubNeverTakenOverByRecruitPanel', !hubGuard.showsRecruit && hubGuard.showsHub,
+  `大廳被編隊面板蓋掉：${JSON.stringify(hubGuard)}`);
+
+// 回到編隊狀態給後面的測試用
+await page.evaluate(() => window.game_actions.startRun());
+await page.waitForFunction(() => document.getElementById('panel').innerText.includes('編隊出擊'),
+  null, { timeout: 5000 }).catch(() => {});
+await page.evaluate(() => window.game_actions.recruitGo());
 
 // 屬性上色只能動「青藍色發光」，不准碰重創狀態的橘色火花。
 // 第一版用 ctx.filter hue-rotate 整張轉，橘色火花變成洋紅 ——

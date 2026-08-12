@@ -2,7 +2,7 @@
 // 所以重繪不會弄丟 handler；靠 signature 比對避免每一幀都重建。
 
 import {
-  TREE, META_UPGRADES, NODE_TYPES, FLOORS, CREDITS, CREDITS_META, ELEMENTS, TUNE, TRAITS,
+  TREE, META_UPGRADES, NODE_TYPES, FLOORS, CREDITS, CREDITS_META, ELEMENTS, TUNE, TRAITS, traitV,
 } from './data.js';
 import {
   availableNodes, squadAlive, xpToNext, unitById, actableUnits, damageBreakdown, dist,
@@ -25,11 +25,17 @@ const elTag = (u) => {
 // 穩定性是抽象數字，直接換算成「傷害會飄多少」玩家才有感
 const spreadPct = (u) => Math.round(TUNE.BASE_SPREAD * (1 - (u.stab ?? 60) / 100) * 100);
 
-// 詞條標籤。正負用顏色分，玩家掃過名單時不必逐條讀字
+// 詞條標籤。正負用顏色分，玩家掃過名單時不必逐條讀字。
+// 說明文字用 u.trv 裡「實際生效」的數值，不是基準值 ——
+// 買了「詞條強化」卻看到沒變的說明，玩家會以為升級沒生效。
+const traitDesc = (u, id) => {
+  const t = TRAITS[id];
+  return typeof t.d === 'function' ? t.d(traitV(u, id)) : t.d;
+};
 const traitTags = (u) => (u.tr ?? []).map((id) => {
   const t = TRAITS[id];
   if (!t) return '';
-  return `<span class="trait ${t.good ? 'good' : 'bad'}" title="${esc(t.d)}">${t.good ? '＋' : '－'}${esc(t.n)}</span>`;
+  return `<span class="trait ${t.good ? 'good' : 'bad'}" title="${esc(traitDesc(u, id))}">${t.good ? '＋' : '－'}${esc(t.n)}</span>`;
 }).join('');
 
 const btn = (act, label, opts = {}) => {
@@ -105,8 +111,9 @@ function panelHtml(g, meta, opts) {
 
   const parts = [topBar(g, meta, opts)];
 
-  // 編隊還沒確認就不該看到地圖 —— 兩個都是「選擇」，同時出現只會讓玩家點錯
-  if (g.pending.recruit) {
+  // 編隊還沒確認就不該看到地圖 —— 兩個都是「選擇」，同時出現只會讓玩家點錯。
+  // 但只在地圖畫面接管：不加 screen 判斷的話，回到大廳時編隊面板會蓋掉升級清單。
+  if (g.pending.recruit && g.screen === 'map') {
     parts.push(recruitPanel(g));
     parts.push(logPanel(g));
     return parts.join('');
@@ -374,10 +381,13 @@ function recruitPanel(g) {
   const rows = g.recruits.map((u) => {
     const on = r.picked.includes(u.id);
     const idx = r.picked.indexOf(u.id);
+    // 「幹員篩選」買來的無負面名額要標出來，不然玩家不會知道那 200 碎片換到了什麼
+    const clean = (u.tr ?? []).every((id) => TRAITS[id]?.good);
     return `
       <div class="item recruit${on ? ' sel' : ''}" data-act="recruit:${u.id}">
         <div class="item-head">
           <b>${esc(u.n)}</b>
+          ${clean ? '<span class="tag clean">無負面</span>' : ''}
           <span class="tag">${on ? `已編入 ${idx + 1}` : '候補'}</span>
         </div>
         <div class="item-body">
@@ -418,7 +428,7 @@ function repairSection(g) {
       <div class="item${o.ok ? '' : ' down'}">
         <div class="item-head">
           <b>${esc(o.n)}</b>
-          <span class="tag">${o.cost} 點${o.max ? `・${o.used}/${o.max}` : ''}</span>
+          <span class="tag">${o.surcharge ? '⚠ ' : ''}${o.cost} 點${o.max ? `・${o.used}/${o.max}` : ''}</span>
         </div>
         <div class="item-body">${esc(o.d)}　<span class="mut">→ ${esc(o.target)}</span></div>
         ${btn(`repair:${o.id}`, o.ok ? '購買' : (o.reason || '無法購買'), { disabled: !o.ok })}

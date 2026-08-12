@@ -23,9 +23,10 @@ npm run dev            # 本機開發 http://localhost:5178（ES module 不能�
 npm run sim            # 玩法評估器，跑 300 場，輸出勝率／深度分佈／回合長度
 npm run sim:max        # 模擬永久升級點滿的老玩家
 npm run sim:long       # 跑 2000 場，數字比較穩
+node tools/simulate.mjs --meta=max --drop=dualperk,augment   # 關掉指定永久升級，量單項貢獻
 npm test               # Playwright 整合測試（35 項斷言 + console error 檢查）
 npm run check          # sim + test + audio + tactics 一起跑
-npm run check:tactics  # 戰術層 52 項：相剋／側背／區間／詞條／編隊／修整／上色
+npm run check:tactics  # 戰術層 83 項：相剋／側背／區間／詞條／永久升級／編隊／修整／上色
 npm run shots          # 各畫面截圖到 test-output/shots/，要人眼看
 npm run assets         # 重切素材表 + 重做 OG 圖
 npm run assets:review  # 素材接觸表（深色底），檢查去背與損傷遞進
@@ -88,9 +89,13 @@ serve.mjs           零依賴靜態伺服器（開發 + 測試共用）
 - **朝向是真的狀態**（`u.faceX` / `u.faceY`），不是視覺。移動與攻擊都會更新它，
   被攻擊會轉頭面向攻擊者（所以繞後的優勢用一次就沒了）。
   `render.js` 的 `facingOf()` **必須讀這兩個欄位**，畫出來的方向要跟判定用的是同一個。
-- **每次出擊的三名幹員是現抽的**：5 名候補選 3，數值有浮動、固定一正一負詞條。
+- **每次出擊的三名幹員是現抽的**：5 名候補選 3，數值有浮動、固定一正一負詞條（16 正 / 16 負）。
   `createGame` 一定會先自動選好前三名，所以模擬器與測試不經過選人畫面也拿得到合法小隊；
   互動選人只是改寫 `pending.recruit.picked`。
+- **詞條強度寫在 `TRAITS[id].v`，不要寫死在 `stat()` 或 `damageBreakdown` 裡。**
+  永久升級「詞條強化」會放大正面詞條，所以強度必須是可以被乘的資料。
+  放大後的值在生成當下算好存進 `u.trv`，之後所有 hook 一律讀 `u.trv` ——
+  只有一個地方負責套用倍率，才不會有的效果吃到、有的漏掉。
 - **外觀走獨立亂數流 `lookRng`**。skin / look 不准抽在遊戲 `rng` 上 ——
   加一套素材就會把整條隨機序列往後推，平衡數字跟著失真但完全看不出原因。
 - 畫面狀態機：`title` → `hub` → `map` → `battle` → `victory` → `map` ...，另有 `credits` / `event` / `shop` / `supply` / `result`。
@@ -112,7 +117,7 @@ codex/data/items.json      每張素材表的 prompt + 列數欄數 + 每格對�
         ↓  node scripts/codex-generate.mjs item <id>        約 90 到 125 秒／張
 codex/images/items/*.png   大張素材表（純洋紅背景，3x3 或 2x3）
         ↓  npm run assets
-assets/units/*.webp        33 張單位（11 個單位 x 完好／受損／重創）
+assets/units/*.webp        42 張單位（14 套外觀 x 完好／受損／重創）
 assets/props/*.webp        6 張道具（掩體三階段、登陸點、碎片、補給箱）
 assets/icons/*.webp        8 個關卡節點圖示徽章
 assets/ui/*.webp           面板底板（slice:false 的整張圖，不切格）
@@ -123,7 +128,7 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 
 1. **這是做損傷狀態的唯一正解。** AI 分次生成同一個角色必然漂移（配色偏掉、輪廓抖動），
    但單次生成內能鎖住角色特徵。所以同一列的完好／受損／重創**必須在同一次生成裡**。
-2. 省配額。6 次生成產出 39 張素材。
+2. 省配額。7 次生成產出 57 張素材。
 
 ### 三個踩過的坑
 
@@ -189,7 +194,8 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 | 加新卡片 | `src/data.js` 的 `CARDS` + `src/engine.js` 的 `applyCard` |
 | 加新事件 | `src/data.js` 的 `EVENTS`。效果型別看 `engine.js` 的 `applyEffects` |
 | 加新永久升級 | `src/data.js` 的 `META_UPGRADES` + `engine.js` 的 `rollOperative` / `createGame` |
-| 加新詞條 | `src/data.js` 的 `TRAITS`。純數值型寫 `stat(u)`；行為型要在 `damageBreakdown` 加分支並回報進 `traitMods` |
+| 加新詞條 | `src/data.js` 的 `TRAITS`（強度寫 `v`，整數型加 `int: 1`）。純數值型寫 `stat(u, v)`；行為型在對應 hook 讀 `traitV(u, id)`，傷害型還要回報進 `traitMods` |
+| 加詞條相關的永久升級 | `src/data.js` 的 `META_UPGRADES` + `engine.js` 的 `rollOperative` / `rollRecruits`。⚠️ 這類升級彼此相乘，必須用 `--drop` 拆開量 |
 | 改相剋 / 側背倍率 | `src/data.js` 的 `TUNE`，然後**一定要重跑 `npm run sim:max`**（乘數會連動總傷害曲線） |
 | 加戰後修整項目 | `src/engine.js` 的 `REPAIRS`。`scope: 'squad'` 記在 `pending.victory.bought`，`'unit'` 記在 `u.rep` |
 | 改敵方 AI | `src/engine.js` 的 `bestTarget` / `bestMove` / `actEnemy` |
@@ -225,6 +231,23 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 
 ⚠️ 打死人會冒出升級抽卡，**抽卡沒選完棋盤是鎖住的**（`tapBoard` 回「請先完成升級抽卡」）。
 測試裡連續操作棋盤前要先把 `pending.draft` 清掉。
+
+⚠️ **音量斷言要取一段時間的最大值，不能單點取樣。** BGM 是有起伏的環境音，
+單點剛好落在音符之間就會量到接近 0，實測有三分之一機率誤報「沒聲音」。
+會誤報的測試比沒有測試更糟 —— 它會讓人去查一個不存在的 bug。
+
+### 加了新機制之後，怎麼確定它真的接上了
+
+`check-tactics` 的每一條斷言都應該通得過「負面對照」：**把實作那一行註解掉，斷言要變紅**。
+詞條特別容易寫了卻沒接上 —— 遊戲不會壞，只是說明文字在騙人。實際做過的例子：
+
+```bash
+# 把 engine.js 的 killer.ap += back 註解掉
+node tools/check-tactics.mjs   # → traitExecutionerRefundsAp 必須失敗
+```
+
+第一版驗「放棄回基地」的斷言就沒通過這關：它只驗到 `toHub` 有沒有清 `pending.recruit`，
+沒驗到 `ui.js` 那道 screen 判斷，所以拔掉 ui 的防線它照樣是綠的。後來補了第二條才涵蓋。
 
 ---
 

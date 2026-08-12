@@ -6,7 +6,7 @@ import {
   GRID, FLOORS, TUNE, ROLES, PLAYER_TEMPLATES, ENEMY_ARCHETYPES, BOSSES,
   TREE, PASS, CARDS, CARD_BY_ID, COVER_PATTERNS, EVENTS, SHOP_SERVICES,
   RARITY, coresEarned, elementMultiplier,
-  TRAITS, GOOD_TRAITS, BAD_TRAITS, CALLSIGNS,
+  TRAITS, GOOD_TRAITS, BAD_TRAITS, CALLSIGNS, traitV, hasTrait,
 } from './data.js';
 import { makeRng, hashSeed, readableSeed } from './rng.js';
 import { generateValidMap } from './mapgen.js';
@@ -50,7 +50,7 @@ function metaLevel(meta, id) {
 // 第一版把 skin / look 直接抽在 rng 上，結果加了一套外觀變體之後
 // 整條隨機序列往後移，模擬通關率從 47.4% 變成 42.0% ——
 // 遊戲一點都沒變難，只是換了一組樣本。純美術的改動不該讓平衡數字失真。
-export function rollOperative(rng, meta, template, lookRng = rng) {
+export function rollOperative(rng, meta, template, lookRng = rng, opts = {}) {
   const hpBonus = metaLevel(meta, 'hp') * 2;
   const atkBonus = metaLevel(meta, 'atk') * 1;
   const apBonus = metaLevel(meta, 'ap') >= 1 ? 1 : 0;
@@ -75,6 +75,7 @@ export function rollOperative(rng, meta, template, lookRng = rng) {
     stab: t.stab + rng.int(TUNE.ROLL_STAB * 2 + 1) - TUNE.ROLL_STAB,
     ap: t.ap + apBonus,
     tr: [],
+    trv: {},
     faceX: 0,
     faceY: -1,
     lv: 1,
@@ -91,10 +92,33 @@ export function rollOperative(rng, meta, template, lookRng = rng) {
     fireMs: 0,
   };
 
-  const good = GOOD_TRAITS[rng.int(GOOD_TRAITS.length)];
-  const bad = BAD_TRAITS[rng.int(BAD_TRAITS.length)];
-  u.tr = [good, bad];
-  for (const id of u.tr) TRAITS[id].stat?.(u);
+  // 詞條：預設一正一負。
+  //   dualperk（雙專長）→ 多一個正面
+  //   opts.clean（幹員篩選）→ 這一名不帶負面
+  // 抽第二個正面時會重抽避免撞號 —— 兩個「老兵」疊起來只是數字變大，
+  // 看起來像 bug，而且會讓「兩個詞條」這件事失去意義。
+  const good = [pickTrait(rng, GOOD_TRAITS)];
+  if (metaLevel(meta, 'dualperk') >= 1) {
+    good.push(pickTrait(rng, GOOD_TRAITS, good));
+  }
+  u.tr = opts.clean ? good : [...good, pickTrait(rng, BAD_TRAITS)];
+
+  // 正面詞條吃「詞條強化」的倍率，負面永遠是原值。
+  // 倍率在這裡一次算完存進 trv，之後所有 hook 一律讀 trv ——
+  // 這樣「誰負責套用倍率」只有一個地方，不會有的效果吃到、有的漏掉。
+  //
+  // ⚠️ 第二專長（雙專長給的那個）不吃強化。
+  // 三個新升級是相乘的：雙專長給兩個正面、強化把兩個都放大、篩選再拿掉負面。
+  // 實測各自只值 +4.6 / +2.5 / +9.8 個百分點，一起開卻是 +25.6。
+  // 「強化模組只能裝一個」既把相乘斷開，也是玩家講得出口的規則。
+  const boost = 1 + metaLevel(meta, 'augment') * TUNE.AUGMENT_STEP;
+  u.tr.forEach((id, i) => {
+    const def = TRAITS[id];
+    const boosted = def.good && i === 0;
+    const raw = boosted ? def.v * boost : def.v;
+    u.trv[id] = def.int ? Math.round(raw) : Math.round(raw * 100) / 100;
+    def.stat?.(u, u.trv[id]);
+  });
 
   // 詞條與抖動疊起來可能把數值推到荒謬區間，最後統一夾一次
   u.mhp = Math.max(6, u.mhp);
@@ -107,11 +131,21 @@ export function rollOperative(rng, meta, template, lookRng = rng) {
   return u;
 }
 
+// 從清單抽一個詞條，避開已經抽到的
+function pickTrait(rng, pool, exclude = []) {
+  const left = pool.filter((id) => !exclude.includes(id));
+  const from = left.length ? left : pool;
+  return from[rng.int(from.length)];
+}
+
 // 候補名單。原型輪流出現（不是純隨機），確保 5 個候補一定涵蓋三種屬性，
 // 否則有機會抽到 5 個都是動能系 —— 相剋系統當場失效，那才是最壞的隨機。
+//
+// 「幹員篩選」給的無負面名額放在名單最前面，玩家一打開就看得到那是升級換來的。
 export function rollRecruits(rng, meta, n = TUNE.RECRUIT_POOL, lookRng = rng) {
+  const clean = Math.min(n, metaLevel(meta, 'screening'));
   return Array.from({ length: n }, (_, i) => (
-    rollOperative(rng, meta, PLAYER_TEMPLATES[i % PLAYER_TEMPLATES.length], lookRng)
+    rollOperative(rng, meta, PLAYER_TEMPLATES[i % PLAYER_TEMPLATES.length], lookRng, { clean: i < clean })
   ));
 }
 
@@ -427,49 +461,83 @@ export function flankOf(attacker, target) {
   return { mult: TUNE.FLANK_SIDE, label: '側擊' };
 }
 
+// 場上有沒有人貼在這一格旁邊
+function adjacentCount(g, u, team) {
+  return battleUnits(g).filter((o) => (
+    o.alive && o !== u && o.tm === team && dist(o.x, o.y, u.x, u.y) === 1
+  )).length;
+}
+
 // 一次算完所有修正，並回傳每一項，這樣 UI 才能把「為什麼是這個數字」攤開給玩家看。
 // 戰鬥預測（聖火降魔錄真正的發明）靠的就是這個函式。
-const hasTrait = (u, id) => !!u.tr?.includes(id);
-
+//
+// 新增詞條時：修正一律走這裡，而且一定要 push 進 traitMods。
+// 沒 push 的話玩家看得到數字變了卻不知道為什麼，那比沒有這個詞條還糟。
 export function damageBreakdown(g, attacker, target) {
   const d = dist(attacker.x, attacker.y, target.x, target.y);
   const bonusMelee = d === 1 && attacker.pass.includes(PASS.A3) ? 1 : 0;
   const bonusRanged = d >= 2 && attacker.pass.includes(PASS.R5) ? 1 : 0;
+  const onCover = !!g.battle?.cover.has(key(target.x, target.y));
+  const traitMods = [];
+  const note = (id, m) => traitMods.push({ n: TRAITS[id].n, m, good: TRAITS[id].good });
 
   let cover = 0;
   const coverIgnored = attacker.pass.includes(PASS.A5) || hasTrait(attacker, 'breacher');
-  if (d >= 2 && g.battle?.cover.has(key(target.x, target.y))
-      && !coverIgnored && !hasTrait(target, 'exposed')) {
+  if (d >= 2 && onCover && !coverIgnored && !hasTrait(target, 'exposed')) {
     cover = TUNE.COVER + (target.pass.includes(PASS.R4) ? 1 : 0);
+    // 堅守：自己站掩體時再多擋一點
+    if (hasTrait(target, 'entrench')) {
+      cover += traitV(target, 'entrench');
+      note('entrench', traitV(target, 'entrench'));
+    }
   }
+  if (coverIgnored && d >= 2 && onCover && hasTrait(attacker, 'breacher')) note('breacher', 1);
+  if (hasTrait(target, 'exposed') && d >= 2 && onCover) note('exposed', 1);
 
   const elem = elementMultiplier(attacker.el, target.el);
   const flank = flankOf(attacker, target);
 
-  // 詞條修正。全部走乘算並且各自記錄，戰鬥預測卡才列得出「為什麼是這個數字」。
+  // 側背加減：側翼專家與警覺／怯戰都是加在「側背倍率」上，不是另外乘一層。
+  // 疊在同一層才不會出現 1.45 x 1.2 x 1.2 這種指數爆炸。
   let flankMult = flank.mult;
   if (flank.label) {
-    if (hasTrait(attacker, 'flanker')) flankMult += TUNE.FLANKER_BONUS;
-    if (hasTrait(target, 'skittish')) flankMult += TUNE.SKITTISH_PENALTY;
+    if (hasTrait(attacker, 'flanker')) {
+      flankMult += traitV(attacker, 'flanker');
+      note('flanker', traitV(attacker, 'flanker'));
+    }
+    if (hasTrait(target, 'skittish')) {
+      flankMult += traitV(target, 'skittish');
+      note('skittish', traitV(target, 'skittish'));
+    }
+    if (hasTrait(target, 'alert')) {
+      flankMult = Math.max(1, flankMult - traitV(target, 'alert'));
+      note('alert', traitV(target, 'alert'));
+    }
   }
-  const traitMods = [];
+
+  // 其餘詞條走乘算
   let traitMult = 1;
+  const mul = (id, m) => { traitMult *= m; note(id, m); };
   if (hasTrait(attacker, 'finisher') && target.hp <= target.mhp / 2) {
-    traitMult *= 1 + TUNE.FINISHER_BONUS;
-    traitMods.push({ n: TRAITS.finisher.n, m: 1 + TUNE.FINISHER_BONUS });
+    mul('finisher', 1 + traitV(attacker, 'finisher'));
+  }
+  if (hasTrait(attacker, 'hunter') && elem > 1) {
+    mul('hunter', 1 + traitV(attacker, 'hunter'));
   }
   if (hasTrait(attacker, 'hesitant') && target.hp >= target.mhp) {
-    traitMult *= 0.8;
-    traitMods.push({ n: TRAITS.hesitant.n, m: 0.8 });
+    mul('hesitant', 1 - traitV(attacker, 'hesitant'));
   }
-  if (hasTrait(attacker, 'flanker') && flank.label) {
-    traitMods.push({ n: TRAITS.flanker.n, m: TUNE.FLANKER_BONUS });
+  if (hasTrait(attacker, 'panicky') && attacker.hp <= attacker.mhp / 2) {
+    mul('panicky', 1 - traitV(attacker, 'panicky'));
   }
-  if (hasTrait(target, 'skittish') && flank.label) {
-    traitMods.push({ n: TRAITS.skittish.n, m: TUNE.SKITTISH_PENALTY });
+  if (hasTrait(attacker, 'loner') && adjacentCount(g, attacker, attacker.tm) > 0) {
+    mul('loner', 1 - traitV(attacker, 'loner'));
   }
-  if (hasTrait(attacker, 'breacher') && d >= 2 && g.battle?.cover.has(key(target.x, target.y))) {
-    traitMods.push({ n: TRAITS.breacher.n, m: 1 });
+  if (hasTrait(attacker, 'coward') && adjacentCount(g, attacker, attacker.tm === 'p' ? 'e' : 'p') > 0) {
+    mul('coward', 1 - traitV(attacker, 'coward'));
+  }
+  if (hasTrait(target, 'brittle') && elem > 1) {
+    mul('brittle', 1 + traitV(target, 'brittle'));
   }
 
   const raw = attacker.atk + bonusMelee + bonusRanged - cover;
@@ -478,8 +546,21 @@ export function damageBreakdown(g, attacker, target) {
   // 穩定性越高，區間越窄。stab 100 = 完全確定，stab 0 = 上下浮動 45%
   const stab = Math.max(0, Math.min(100, attacker.stab ?? 60));
   const spread = TUNE.BASE_SPREAD * (1 - stab / 100);
-  const min = Math.max(1, Math.round(mid * (1 - spread)));
-  const max = Math.max(min, Math.round(mid * (1 + spread)));
+  // 精算與故障頻傳是「單邊收窄」：一個把下緣往上拉、一個把上緣往下壓。
+  // 這跟「穩定性」不同 —— 穩定性是兩邊一起收，期望值不變；
+  // 這兩個會實際改變期望值，所以是有份量的詞條而不是換句話說。
+  let lo = spread;
+  let hi = spread;
+  if (hasTrait(attacker, 'precise')) {
+    lo *= 1 - traitV(attacker, 'precise');
+    note('precise', traitV(attacker, 'precise'));
+  }
+  if (hasTrait(attacker, 'unreliable')) {
+    hi *= 1 - traitV(attacker, 'unreliable');
+    note('unreliable', traitV(attacker, 'unreliable'));
+  }
+  const min = Math.max(1, Math.round(mid * (1 - lo)));
+  const max = Math.max(min, Math.round(mid * (1 + hi)));
 
   return {
     min,
@@ -679,7 +760,13 @@ export function xpToNext(lv) {
 
 function grantXp(g, unit, amount) {
   if (!unit.alive || unit.tm !== 'p' || amount <= 0) return;
-  unit.xp += amount;
+  // 快速學習 / 遲鈍。加在這裡而不是呼叫端，是因為擊殺與分潤兩條路都會經過，
+  // 分開處理遲早會有一條漏掉。
+  let mult = 1;
+  if (hasTrait(unit, 'quicklearn')) mult += traitV(unit, 'quicklearn');
+  if (hasTrait(unit, 'dull')) mult -= traitV(unit, 'dull');
+  const gained = Math.max(1, Math.round(amount * Math.max(0.1, mult)));
+  unit.xp += gained;
   while (unit.xp >= xpToNext(unit.lv)) {
     unit.xp -= xpToNext(unit.lv);
     unit.lv++;
@@ -697,6 +784,23 @@ function onEnemyKilled(g, killer, victim) {
   g.stats.kills++;
   if (g.battle.nodeType === 'elite' || victim.boss) g.stats.eliteKills++;
   if (killer.tm !== 'p') return;
+
+  // 冷血：擊殺回 AP。只回移動力，不解除「每回合限攻擊一次」——
+  // 解除的話就變回「AP = 傷害倍率」，那條規則是整個戰鬥節奏的地基（見 BALANCE.md 決策 1）。
+  if (hasTrait(killer, 'executioner')) {
+    const back = Math.min(traitV(killer, 'executioner'), killer.map - killer.ap);
+    if (back > 0) {
+      killer.ap += back;
+      log(g, `${killer.n} 冷血：擊殺後回復 ${back} AP。`);
+    }
+  }
+  // 拾荒者：撿零件換信用點
+  if (hasTrait(killer, 'scavenger')) {
+    const gain = traitV(killer, 'scavenger');
+    g.credits += gain;
+    log(g, `${killer.n} 拾荒：+${gain} 信用點。`);
+  }
+
   grantXp(g, killer, TUNE.KILL_XP);
   // 隊友分潤，避免整個 run 只有一個單位在長
   const assist = Math.round(TUNE.KILL_XP * TUNE.ASSIST_XP_PCT);
@@ -964,6 +1068,19 @@ function beginPlayerTurn(g) {
     if (!u.alive) continue;
     u.ap = u.map;
     u.attacked = 0;
+    // 回合開始的持續效果。內傷永遠留 1 HP ——
+    // 「自己流血流到死」對玩家來說是最沒有回饋的死法，那不是取捨是懲罰。
+    if (hasTrait(u, 'regen') && u.hp < u.mhp) {
+      const amt = Math.min(traitV(u, 'regen'), u.mhp - u.hp);
+      u.hp += amt;
+      fx(g, { type: 'pulse', x: u.x, y: u.y, color: '#8fffad', life: 260, size: 1.1 });
+      log(g, `${u.n} 自我修復 +${amt} HP。`);
+    }
+    if (hasTrait(u, 'bleeding') && u.hp > 1) {
+      const amt = Math.min(traitV(u, 'bleeding'), u.hp - 1);
+      u.hp -= amt;
+      log(g, `${u.n} 的內傷惡化 −${amt} HP。`);
+    }
   }
   b.selectedId = aliveOf(g, 'p')[0]?.id ?? null;
   if (b.turn === TUNE.TURN_LIMIT - 5) log(g, `警告：剩下 5 個回合就會被迫撤退。`, true);
@@ -1104,6 +1221,13 @@ const repairUsed = (g, r) => (r.scope === 'squad'
   ? (g.pending.victory?.bought?.[r.id] ?? 0)
   : (focusUnit(g)?.rep?.[r.id] ?? 0));
 
+// 揮霍：對這名幹員做個人項目比較貴。全隊項目不受影響。
+function repairCost(g, r) {
+  const u = focusUnit(g);
+  if (r.scope === 'squad' || !hasTrait(u, 'costly')) return r.cost;
+  return Math.round(r.cost * (1 + traitV(u, 'costly')));
+}
+
 // 每次都重算，因為「買得起 / 還有沒有名額 / 有沒有意義」會隨著操作改變
 export function repairOptions(g) {
   const u = focusUnit(g);
@@ -1111,18 +1235,20 @@ export function repairOptions(g) {
     const used = repairUsed(g, r);
     const capped = used >= r.max;
     const useless = r.can ? !r.can(g) : false;
+    const cost = repairCost(g, r);
     return {
       id: r.id,
       n: r.n,
       d: r.d,
-      cost: r.cost,
+      cost,
+      surcharge: cost > r.cost,
       target: r.scope === 'squad' ? '全隊' : (u?.n ?? ''),
       used,
       max: r.max,
-      ok: !capped && !useless && g.credits >= r.cost,
+      ok: !capped && !useless && g.credits >= cost,
       reason: capped ? (r.scope === 'squad' ? '本場已修整過' : '已達上限')
         : useless ? '目前買了也沒作用'
-          : g.credits < r.cost ? '信用點不足' : '',
+          : g.credits < cost ? '信用點不足' : '',
     };
   });
 }
@@ -1133,7 +1259,7 @@ export function buyRepair(g, id) {
   if (!opt) return { ok: false, reason: '沒有這個項目' };
   if (!opt.ok) return { ok: false, reason: opt.reason || '無法購買' };
 
-  const def = REPAIRS.find((r) => r.id === id);
+  const def = { ...REPAIRS.find((r) => r.id === id), cost: opt.cost };
   g.credits -= def.cost;
   if (def.scope === 'squad') {
     const v = g.pending.victory;

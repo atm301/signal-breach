@@ -47,7 +47,18 @@ const titleFlow = await page.evaluate(() => {
 //     不驗的話「沒聲音」只會在真人玩的時候才發現。
 await page.mouse.click(5, 5);
 await page.waitForTimeout(400);
-const audio = await page.evaluate(() => window.__audio());
+// 音量取樣要取一段時間的最大值，不能只抓一瞬間。
+// BGM 是有起伏的環境音，單點取樣剛好落在音符之間就會量到接近 0 ——
+// 實測單點取樣有三分之一的機率誤報「沒聲音」，那是最糟的測試：
+// 它會讓人以為音訊壞了，然後花時間去查一個不存在的 bug。
+const audio = await page.evaluate(async () => {
+  let peak = 0;
+  for (let i = 0; i < 24; i++) {
+    peak = Math.max(peak, window.__audio().level ?? 0);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return { ...window.__audio(), level: peak };
+});
 await page.evaluate(() => { window.game_actions.startRun(); });
 await page.waitForTimeout(200);
 const audioInRun = await page.evaluate(() => window.__audio());

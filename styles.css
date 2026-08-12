@@ -199,6 +199,7 @@ button.big { padding: 15px; font-size: 16px; font-weight: 800; letter-spacing: 2
 }
 .trait.good { color: #8fffad; }
 .trait.bad { color: #ff9d9d; }
+.tag.clean { color: #8fffad; border-color: #4f9c6a; }
 
 /* 編隊：選中的候補要一眼看得出來，因為這是出擊前唯一的決策 */
 .item.recruit { cursor: pointer; }

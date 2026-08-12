@@ -39,16 +39,14 @@ export const TUNE = {
   BASE_SPREAD: 0.45,
   // 相剋與側背讓玩家的期望傷害大幅上升（最高 1.35 x 1.45 = 1.96 倍），
   // 敵人血量要跟上，否則戰鬥會縮回 3 回合以下、通關率飆到 76%。
-  ENEMY_HP_MULT: 1.23,
+  ENEMY_HP_MULT: 1.35,
 
   // ── 隨機幹員 ──────────────────────────────────────────
   RECRUIT_POOL: 5, // 每次出擊抽這麼多名候補
   SQUAD_SIZE: 3, // 從候補裡選這麼多人上場
   ROLL_HP: 3, // 數值抖動幅度（±）
   ROLL_STAB: 12,
-  FLANKER_BONUS: 0.2, // 「側翼專家」在側背時額外加的倍率
-  SKITTISH_PENALTY: 0.2, // 「怯戰」被側背時額外吃的倍率
-  FINISHER_BONUS: 0.25, // 「收割者」對殘血目標的加成
+  AUGMENT_STEP: 0.25, // 永久升級「詞條強化」每階把正面詞條放大這麼多
 };
 
 // ---------------------------------------------------------------- 屬性相剋
@@ -104,28 +102,68 @@ export const PLAYER_TEMPLATES = [
 // 不會拿去繞後；手抖的狙擊手你會讓他打大目標而不是收殘血。
 // 如果負面詞條只是數值扣一點，玩家的最佳解永遠是「重開直到抽到好的」。
 //
-// stat(u) 在生成當下改數值；behave 的詞條由 damageBreakdown 直接讀 u.tr。
+// 每個詞條的「強度」寫在 v，不要寫死在 stat() 或 damageBreakdown 裡。
+// 因為永久升級「詞條強化」會把正面詞條的 v 放大，強度必須是資料而不是常數。
+// 放大後的值在生成當下就算好存進 u.trv，之後所有地方一律讀 u.trv ——
+// 這樣「誰負責套用倍率」只有一個地方，不會出現有的效果吃到倍率、有的沒吃到。
+//
+// int: true 代表這是整數數值（HP / ATK / 射程 / AP），放大後要進位。
+// stat(u, v) 在生成當下改數值；沒有 stat 的就是行為型，由對應的 hook 讀 u.trv。
 export const TRAITS = {
-  // ── 正面 ──
-  veteran: { n: '老兵', d: 'Max HP +4', good: 1, stat: (u) => { u.mhp += 4; } },
-  marksman: { n: '神槍手', d: 'ATK +1', good: 1, stat: (u) => { u.atk += 1; } },
-  steady: { n: '冷靜', d: '穩定性 +18（傷害更集中）', good: 1, stat: (u) => { u.stab += 18; } },
-  swift: { n: '迅捷', d: 'Max AP +1', good: 1, stat: (u) => { u.ap += 1; } },
-  scout: { n: '前哨', d: '射程 +1', good: 1, stat: (u) => { u.rg += 1; } },
-  flanker: { n: '側翼專家', d: '側擊與背擊的加成再 +20%', good: 1 },
-  breacher: { n: '破障', d: '無視目標的掩體', good: 1 },
-  finisher: { n: '收割者', d: '對 HP 低於一半的目標 +25%', good: 1 },
+  // ── 正面：數值型 ──
+  veteran: { n: '老兵', good: 1, v: 4, int: 1, d: (v) => `Max HP +${v}`, stat: (u, v) => { u.mhp += v; } },
+  marksman: { n: '神槍手', good: 1, v: 1, int: 1, d: (v) => `ATK +${v}`, stat: (u, v) => { u.atk += v; } },
+  steady: { n: '冷靜', good: 1, v: 18, int: 1, d: (v) => `穩定性 +${v}（傷害更集中）`, stat: (u, v) => { u.stab += v; } },
+  swift: { n: '迅捷', good: 1, v: 1, int: 1, d: (v) => `Max AP +${v}`, stat: (u, v) => { u.ap += v; } },
+  scout: { n: '前哨', good: 1, v: 1, int: 1, d: (v) => `射程 +${v}`, stat: (u, v) => { u.rg += v; } },
 
-  // ── 負面 ──
-  oldwound: { n: '舊傷', d: 'Max HP −4', good: 0, stat: (u) => { u.mhp -= 4; } },
-  worn: { n: '損耗', d: 'ATK −1', good: 0, stat: (u) => { u.atk -= 1; } },
-  jittery: { n: '手抖', d: '穩定性 −22（傷害更飄）', good: 0, stat: (u) => { u.stab -= 22; } },
-  sluggish: { n: '遲緩', d: 'Max AP −1', good: 0, stat: (u) => { u.ap -= 1; } },
-  nearsighted: { n: '近視', d: '射程 −1', good: 0, stat: (u) => { u.rg -= 1; } },
-  skittish: { n: '怯戰', d: '被側擊或背擊時額外多吃 20%', good: 0 },
-  exposed: { n: '暴露', d: '自己站掩體也沒有減傷', good: 0 },
-  hesitant: { n: '猶豫', d: '對滿血目標 −20%', good: 0 },
+  // ── 正面：出手時 ──
+  flanker: { n: '側翼專家', good: 1, v: 0.2, d: (v) => `側擊與背擊的加成再 +${pct(v)}` },
+  breacher: { n: '破障', good: 1, v: 1, d: () => '無視目標的掩體' },
+  finisher: { n: '收割者', good: 1, v: 0.25, d: (v) => `對 HP 低於一半的目標 +${pct(v)}` },
+  hunter: { n: '專精獵手', good: 1, v: 0.15, d: (v) => `屬性剋制時再 +${pct(v)}` },
+  precise: { n: '精算', good: 1, v: 0.5, d: (v) => `傷害下限往上收 ${pct(v)}（不會打出低標）` },
+
+  // ── 正面：挨打時 ──
+  alert: { n: '警覺', good: 1, v: 0.2, d: (v) => `被側擊或背擊時減傷 ${pct(v)}` },
+  entrench: { n: '堅守', good: 1, v: 1, int: 1, d: (v) => `自己站掩體時再減傷 ${v}` },
+
+  // ── 正面：回合與擊殺 ──
+  regen: { n: '自我修復', good: 1, v: 1, int: 1, d: (v) => `每回合開始回復 ${v} HP` },
+  executioner: { n: '冷血', good: 1, v: 1, int: 1, d: (v) => `擊殺後立刻回復 ${v} AP` },
+  scavenger: { n: '拾荒者', good: 1, v: 8, int: 1, d: (v) => `每次擊殺 +${v} 信用點` },
+  quicklearn: { n: '快速學習', good: 1, v: 0.3, d: (v) => `獲得的經驗值 +${pct(v)}` },
+
+  // ── 負面：數值型 ──
+  oldwound: { n: '舊傷', good: 0, v: 4, int: 1, d: (v) => `Max HP −${v}`, stat: (u, v) => { u.mhp -= v; } },
+  worn: { n: '損耗', good: 0, v: 1, int: 1, d: (v) => `ATK −${v}`, stat: (u, v) => { u.atk -= v; } },
+  jittery: { n: '手抖', good: 0, v: 22, int: 1, d: (v) => `穩定性 −${v}（傷害更飄）`, stat: (u, v) => { u.stab -= v; } },
+  sluggish: { n: '遲緩', good: 0, v: 1, int: 1, d: (v) => `Max AP −${v}`, stat: (u, v) => { u.ap -= v; } },
+  nearsighted: { n: '近視', good: 0, v: 1, int: 1, d: (v) => `射程 −${v}`, stat: (u, v) => { u.rg -= v; } },
+
+  // ── 負面：出手時 ──
+  hesitant: { n: '猶豫', good: 0, v: 0.2, d: (v) => `對滿血目標 −${pct(v)}` },
+  unreliable: { n: '故障頻傳', good: 0, v: 0.5, d: (v) => `傷害上限往下收 ${pct(v)}（打不出高標）` },
+  panicky: { n: '恐慌', good: 0, v: 0.2, d: (v) => `自己 HP 低於一半時 −${pct(v)}` },
+  loner: { n: '獨行', good: 0, v: 0.15, d: (v) => `身邊有隊友時 −${pct(v)}` },
+  coward: { n: '畏縮', good: 0, v: 0.15, d: (v) => `被敵人貼身時 −${pct(v)}` },
+
+  // ── 負面：挨打時 ──
+  skittish: { n: '怯戰', good: 0, v: 0.2, d: (v) => `被側擊或背擊時額外多吃 ${pct(v)}` },
+  exposed: { n: '暴露', good: 0, v: 1, d: () => '自己站掩體也沒有減傷' },
+  brittle: { n: '脆弱', good: 0, v: 0.2, d: (v) => `被屬性剋制時額外多吃 ${pct(v)}` },
+
+  // ── 負面：回合與成長 ──
+  bleeding: { n: '內傷', good: 0, v: 1, int: 1, d: (v) => `每回合開始扣 ${v} HP（不會因此陣亡）` },
+  dull: { n: '遲鈍', good: 0, v: 0.3, d: (v) => `獲得的經驗值 −${pct(v)}` },
+  costly: { n: '揮霍', good: 0, v: 0.5, d: (v) => `對他做戰後修整貴 ${pct(v)}` },
 };
+
+function pct(v) { return `${Math.round(v * 100)}%`; }
+
+// 詞條的實際強度。放大過的值存在 u.trv，沒有就退回基準值。
+export const traitV = (u, id) => u?.trv?.[id] ?? TRAITS[id]?.v ?? 0;
+export const hasTrait = (u, id) => !!u?.tr?.includes(id);
 
 export const GOOD_TRAITS = Object.keys(TRAITS).filter((k) => TRAITS[k].good);
 export const BAD_TRAITS = Object.keys(TRAITS).filter((k) => !TRAITS[k].good);
@@ -319,6 +357,13 @@ export const META_UPGRADES = [
   { id: 'revive', n: '緊急醫療', d: '每 run 一次，隊員陣亡時以 1 HP 復活', max: 1, costs: [150] },
   { id: 'veteran', n: '老兵編制', d: '全隊起始 Lv.2，並立即各獲得一次改裝抽卡', max: 1, costs: [200] },
   { id: 'shop', n: '黑市門路', d: '商店與走私販價格每階 -10%', max: 2, costs: [40, 80] },
+  // ── 詞條相關（買了之後編隊畫面才會變好看） ──
+  // ⚠️ 這三個是超加成的：雙專長給兩個正面、強化把兩個都放大、篩選再拿掉負面，
+  // 三者相乘。第一版（篩選 x2 / 強化 +40% x2 / 雙專長）把 meta=max 從 53% 推到 79%，
+  // 各自量到只有 +4.6 / +2.5 / +9.8，加起來卻是 +25.6。動任何一個都要三個一起重量。
+  { id: 'screening', n: '幹員篩選', d: '候補名單裡有 1 名「沒有負面詞條」的幹員', max: 1, costs: [140] },
+  { id: 'augment', n: '詞條強化', d: '所有正面詞條的效果每階 +25%（負面不變）', max: 2, costs: [130, 220] },
+  { id: 'dualperk', n: '雙專長', d: '每名幹員多帶一個正面詞條', max: 1, costs: [300] },
 ];
 
 export const META_BY_ID = Object.fromEntries(META_UPGRADES.map((u) => [u.id, u]));

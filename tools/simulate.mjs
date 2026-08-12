@@ -30,14 +30,20 @@ const RUNS = Number(args.runs ?? 300);
 const VERBOSE = !!args.verbose;
 const META_MODE = args.meta ?? 'none';
 
+// --drop=a,b 會把這幾個永久升級歸零。
+// 用來量「單一升級到底貢獻幾個百分點」——
+// 三個新升級一起加下去把通關率從 47% 推到 79%，不拆開量就只能亂猜是誰的問題。
+const DROP = String(args.drop ?? '').split(',').filter(Boolean);
+
 function metaFor(mode) {
-  if (mode === 'max') {
-    return { upgrades: Object.fromEntries(META_UPGRADES.map((u) => [u.id, u.max])) };
-  }
-  if (mode === 'mid') {
-    return { upgrades: Object.fromEntries(META_UPGRADES.map((u) => [u.id, Math.ceil(u.max / 2)])) };
-  }
-  return { upgrades: {} };
+  const lvl = (u) => {
+    if (DROP.includes(u.id)) return 0;
+    if (mode === 'max') return u.max;
+    if (mode === 'mid') return Math.ceil(u.max / 2);
+    return 0;
+  };
+  if (mode !== 'max' && mode !== 'mid') return { upgrades: {} };
+  return { upgrades: Object.fromEntries(META_UPGRADES.map((u) => [u.id, lvl(u)])) };
 }
 
 // ---------------------------------------------------------------- 機器人玩家

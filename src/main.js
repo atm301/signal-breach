@@ -86,6 +86,9 @@ function toHub(abandon = false) {
   if (!g) newRun();
   clearRun();
   refreshTitleSave();
+  // 編隊還沒確認就放棄回基地的話，pending.recruit 會留著把大廳整個蓋住 ——
+  // 玩家會發現自己買不了永久升級，而且完全看不出原因。
+  g.pending.recruit = null;
   g.screen = 'hub';
   ui.invalidate();
 }
@@ -397,6 +400,7 @@ window.__debug = {
   selectUnit: (id) => selectUnit(g, id),
   setActionMode: (m) => setActionMode(g, m),
   playSfx: (k, f) => playSfx(k, f),
+  invalidateUi: () => ui.invalidate(),
 };
 window.__assets = () => assetCount();
 window.__audio = () => audioState();
