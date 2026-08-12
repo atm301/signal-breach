@@ -576,6 +576,8 @@ if (placed) {
     dmgFx.snap && dmgFx.dealt === Math.min(dmgFx.snap.value, dmgFx.before),
     `fx=${dmgFx.snap?.value} hpLoss=${dmgFx.dealt} beforeHp=${dmgFx.before}`);
   check('damageFxTagged', !!dmgFx.snap && Array.isArray(dmgFx.snap.tags), JSON.stringify(dmgFx.snap?.tags));
+
+
   await page.screenshot({ path: path.join(outDir, 'damage-number.png') });
 
   // 戰後修整：把敵人全部清掉逼出勝利畫面，然後真的買一次
@@ -654,6 +656,82 @@ if (placed) {
     JSON.stringify(victoryStillVisible));
   await page.screenshot({ path: path.join(outDir, 'repair.png') });
 }
+
+// ---------------------------------------------------------------- 敵方回合看不看得懂
+//
+// 「敵人是不是不會攻擊？」—— 使用者問過這句。答案是會，但整個敵方回合只有 390ms，
+// 三隻敵人移動加開火全擠完，畫面上又沒有任何東西標示是誰在動，
+// 所以玩家的感受就是「什麼都沒發生，血怎麼少了」。
+// 這一段驗的不是「引擎有沒有呼叫 attackUnit」，是「玩家有沒有機會看到」。
+// 這段自己開一場乾淨的戰鬥，不沿用前面被測試改壞的狀態。
+// 沿用的話有時候敵人早就被打光，敵方回合 110ms 就結束，斷言變成偶發紅字，
+// 而那個紅字講的還是假原因（「不可讀」，其實是「沒有敵人」）。
+const aiPhase = await page.evaluate(async () => {
+  window.game_actions.toHub();
+  window.game_actions.startRun();
+  window.game_actions.recruitGo();
+  for (let i = 0; i < 6; i++) {
+    const gm = window.__game();
+    if (gm.screen === 'battle') break;
+    const cur = gm.map.nodes[gm.currentNodeId];
+    const next = (cur?.next || []).map((id) => gm.map.nodes[id]).filter(Boolean);
+    const pick = next.find((n) => n.type === 'battle') || next[0];
+    if (!pick) break;
+    window.game_actions.goNode(pick.id);
+    if (window.__game().pending.supply) window.game_actions.supplyClose();
+    if (window.__game().pending.event) window.game_actions.eventClose();
+  }
+  const gg = window.__game();
+  if (gg.screen !== 'battle') return { skipped: true, screen: gg.screen };
+
+  // 把敵人拉到貼身，保證這一回合一定有人開火
+  const mine = gg.battle.units.filter((u) => u.alive && u.tm === 'p');
+  const foes = gg.battle.units.filter((u) => u.alive && u.tm === 'e');
+  if (!foes.length) return { skipped: true, reason: 'no-foes' };
+  foes.forEach((f, i) => {
+    const t = mine[i % mine.length];
+    f.x = Math.max(0, Math.min(4, t.x + (i % 2 ? -1 : 1)));
+    f.y = t.y;
+  });
+
+  const hpBefore = mine.reduce((s, u) => s + u.hp, 0);
+  const logBefore = gg.log.length;
+  let sawActingMark = false;
+  const t0 = performance.now();
+  window.game_actions.endturn();
+  // 每一幀檢查有沒有標示出「正在行動的敵人」
+  while (window.__game().battle?.phase === 'ai' && performance.now() - t0 < 15000) {
+    if (window.__game().battle.actingId) sawActingMark = true;
+    await new Promise((r) => requestAnimationFrame(r));
+  }
+  const ms = performance.now() - t0;
+  const gg2 = window.__game();
+  const dealt = hpBefore - gg2.battle.units.filter((u) => u.tm === 'p').reduce((s, u) => s + u.hp, 0);
+  // 只數這一次敵方階段新增的攻擊，而且要是「敵人打我方」——
+  // 數整份 log 的話會把玩家自己的攻擊算進去，變成永遠是綠的
+  const foeNames = new Set(foes.map((f) => f.n));
+  const attacks = gg2.log.slice(logBefore)
+    .filter((l) => /攻擊.*造成/.test(l.text) && [...foeNames].some((n) => l.text.startsWith(n))).length;
+  return {
+    ms, dealt, attacks, sawActingMark, foes: foes.length,
+    clearedAfter: !gg2.battle.actingId,
+  };
+});
+// ⚠️ 先驗「這段真的跑到了」。
+// 第一版把這整段放在修整測試之後，那時戰鬥早就結束、screen 是 victory，
+// 於是每一條都靠 aiPhase.skipped 短路成綠燈 —— 我把實作拔掉它照樣全過。
+// 空過的斷言比沒有斷言更危險，它會讓人相信一個沒被驗過的東西。
+check('enemyPhaseProbeRan', !aiPhase.skipped,
+  `這段必須在戰鬥中執行，否則所有敵方回合的斷言都是空的：${JSON.stringify(aiPhase)}`);
+check('enemiesActuallyAttack', aiPhase.attacks > 0,
+  `敵方回合沒有任何攻擊：${JSON.stringify(aiPhase)}`);
+check('enemyAttacksDealDamage', aiPhase.dealt > 0, JSON.stringify(aiPhase));
+check('enemyTurnIsReadable', aiPhase.ms >= 300,
+  `敵方回合只有 ${Math.round(aiPhase.ms)}ms，玩家看不到發生什麼事`);
+check('actingEnemyIsMarked', aiPhase.sawActingMark,
+  '敵方階段沒有標示是哪一隻在行動，整個回合是匿名的');
+check('actingMarkClearedAfterPhase', aiPhase.clearedAfter,
+  '敵方階段結束後標記沒清掉，會留在畫面上');
 
 check('noConsoleErrors', errors.length === 0, errors.slice(0, 3).join(' | '));
 

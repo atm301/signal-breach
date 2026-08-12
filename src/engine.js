@@ -415,6 +415,7 @@ export function startBattle(g, node) {
     actionMode: 'move',
     selectedId: alive[0]?.id ?? null,
     aiQueue: [],
+    actingId: null, // 敵方階段中正在行動的那一隻，給渲染層標示用
     downed: [],
   };
   g.flags.weaken = 0; // 一次性 debuff，用掉就清
@@ -1028,18 +1029,22 @@ export function stepEnemy(g) {
   if (!aliveOf(g, 'p').length) { checkBattleEnd(g); return false; }
 
   const id = b.aiQueue.shift();
-  if (!id) { beginPlayerTurn(g); return false; }
+  if (!id) { b.actingId = null; beginPlayerTurn(g); return false; }
 
   const u = unitById(g, id);
   let attacked = false;
   if (u && u.alive) {
+    // 誰正在行動要進 state，渲染層才畫得出來。
+    // 沒有這個的話整個敵方回合是匿名的：三隻敵人在 0.4 秒內動完，
+    // 玩家只看到血變少，看不出是誰打的、從哪個方向打的。
+    b.actingId = id;
     const before = u.attacked;
     actEnemy(g, u);
     attacked = u.attacked > before;
   }
 
-  if (b.phase !== 'ai') return { more: false, attacked };
-  if (!b.aiQueue.length) { beginPlayerTurn(g); return { more: false, attacked }; }
+  if (b.phase !== 'ai') { b.actingId = null; return { more: false, attacked }; }
+  if (!b.aiQueue.length) { b.actingId = null; beginPlayerTurn(g); return { more: false, attacked }; }
   return { more: true, attacked };
 }
 

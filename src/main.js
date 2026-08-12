@@ -22,8 +22,13 @@ import { dailySeed } from './rng.js';
 
 // 敵方回合的節奏。實測固定 380ms 讓玩家每場乾等 2.3 秒，而且大部分時間只是在看走位。
 // 改成依行動類型給不同時間：純走位快帶過，開火才留時間看清楚。
+//
+// ⚠️ 攻擊那一拍不要再往下砍了。第一版砍到 260ms，整個敵方回合只剩 390ms ——
+// 三隻敵人移動加開火全擠在 0.4 秒內，玩家的感受是「敵人根本沒攻擊，血怎麼少了」。
+// 傷害數字活 900ms，但打擊演出（beam 140ms + 受擊 240ms）會互相蓋掉。
+// 420ms 讓每一次開火有自己的節拍，一場多花約 1.7 秒，換回「看得懂發生什麼事」。
 const AI_MOVE_MS = 120;
-const AI_ATTACK_MS = 260;
+const AI_ATTACK_MS = 420;
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -310,7 +315,15 @@ document.addEventListener('fullscreenchange', resizeCanvas);
 // ---------------------------------------------------------------- 主迴圈
 
 function drainQueues() {
-  for (const f of g.fxQueue) fxList.push({ ...f, maxLife: f.life });
+  for (const f of g.fxQueue) {
+    const fx = { ...f, maxLife: f.life };
+    // 同一格上還沒消失的傷害數字，往上讓一排。
+    // 兩隻敵人打同一個人的時候，數字會疊在完全同一個位置變成一團看不懂的東西。
+    if (fx.type === 'damage') {
+      fx.stack = fxList.filter((o) => o.type === 'damage' && o.x === fx.x && o.y === fx.y).length;
+    }
+    fxList.push(fx);
+  }
   g.fxQueue.length = 0;
   for (const s of g.sfxQueue) playSfx(s.kind, s.freq);
   g.sfxQueue.length = 0;

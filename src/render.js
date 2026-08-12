@@ -304,6 +304,7 @@ function drawUnits(ctx, g, cell, time) {
       ctx.stroke();
 
       drawIdentityMark(ctx, u, cx, cy, outerR, team);
+      drawActingRing(ctx, g, u, cx, cy, outerR, cell, time);
 
       const s = outerR * 2 * (1 + pulse * 0.012);
       ctx.save();
@@ -447,6 +448,38 @@ function drawIdentityMark(ctx, u, cx, cy, outerR, team) {
   ctx.restore();
 }
 
+// 正在行動的敵人：外圈再加一道會轉的虛線環 + 頭頂箭頭。
+//
+// 整個敵方回合只有 0.4 秒，三隻敵人動完，玩家原本只看到血條變短 ——
+// 看不出是誰打的、從哪個方向來的，等於沒有回饋。
+// 這個環的成本是零時間（不拖慢節奏），但把「匿名的一團」變成「那一隻在動」。
+function drawActingRing(ctx, g, u, cx, cy, outerR, cell, time) {
+  if (g.battle?.phase !== 'ai' || g.battle.actingId !== u.id) return;
+  const r = outerR + 7;
+  ctx.save();
+  ctx.strokeStyle = '#ffd980';
+  ctx.lineWidth = 2.5;
+  ctx.setLineDash([r * 0.42, r * 0.34]);
+  ctx.lineDashOffset = -(time / 12) % 1000;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // 頭頂倒三角。虛線環在小螢幕上可能不夠搶眼，箭頭是保險。
+  // 高度要清掉上緣那排 AP 點（畫在 cy - outerR - pipR*2.2），不然會疊在一起看不出是什麼。
+  const ay = cy - outerR - cell * 0.135;
+  const aw = Math.max(5, outerR * 0.22);
+  ctx.beginPath();
+  ctx.moveTo(cx - aw, ay - aw);
+  ctx.lineTo(cx + aw, ay - aw);
+  ctx.lineTo(cx, ay);
+  ctx.closePath();
+  ctx.fillStyle = '#ffd980';
+  ctx.fill();
+  ctx.restore();
+}
+
 // 給 tools/look-sheet.mjs 用：同一份繪製邏輯，避免對照表畫的跟棋盤不一樣
 export const drawIdentityMarkForTest = drawIdentityMark;
 
@@ -534,7 +567,8 @@ function drawFx(ctx, fxList, cell) {
       // 夾住上緣，寧可讓它停在原地也不能讓玩家看不到自己打了多少。
       const cy = Math.max(
         38 + big * 0.6,
-        PAD + f.y * cell + cell * 0.5 - cell * 0.34 - (1 - t) * cell * 0.5,
+        PAD + f.y * cell + cell * 0.5 - cell * 0.34 - (1 - t) * cell * 0.5
+          - (f.stack || 0) * big * 0.95, // 同格已有數字就往上讓，避免疊成一團
       );
       ctx.save();
       // 前 15% 淡入、最後 30% 淡出，中間全不透明，才讀得完

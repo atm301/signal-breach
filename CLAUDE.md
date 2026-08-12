@@ -26,7 +26,7 @@ npm run sim:long       # 跑 2000 場，數字比較穩
 node tools/simulate.mjs --meta=max --drop=dualperk,augment   # 關掉指定永久升級，量單項貢獻
 npm test               # Playwright 整合測試（35 項斷言 + console error 檢查）
 npm run check          # sim + test + audio + tactics 一起跑
-npm run check:tactics  # 戰術層 83 項：相剋／側背／區間／詞條／永久升級／編隊／修整／上色
+npm run check:tactics  # 戰術層 89 項：相剋／側背／區間／詞條／永久升級／編隊／修整／上色／敵方回合
 npm run shots          # 各畫面截圖到 test-output/shots/，要人眼看
 npm run assets         # 重切素材表 + 重做 OG 圖
 npm run assets:review  # 素材接觸表（深色底），檢查去背與損傷遞進
@@ -205,7 +205,7 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 | 改作者的話 | `src/data.js` 的 `CREDITS` / `CREDITS_META` |
 | 改存檔格式 | `src/save.js`。改結構要同步升 `VERSION`，舊存檔會自動作廢 |
 | 改單位朝向 | `src/engine.js` 的 `faceToward`（機制）。`render.js` 的 `facingOf` 只是把它畫出來，不要在那裡自己算 |
-| 改敵方回合速度 | `src/main.js` 的 `AI_MOVE_MS` / `AI_ATTACK_MS`，然後跑 `npm run check:pacing` |
+| 改敵方回合速度 | `src/main.js` 的 `AI_MOVE_MS` / `AI_ATTACK_MS`。⚠️ 攻擊那一拍不要低於 300ms，砍到 260 會讓整個敵方回合只剩 390ms、玩家以為敵人沒攻擊。改完跑 `check:pacing` 與 `check:tactics` |
 | 換素材風格 | `codex/style-guide.md` 的 code block，然後全部重生 |
 
 **加了新的節點類型或新畫面時，記得同步更新 `tools/simulate.mjs` 的機器人**，
@@ -248,6 +248,15 @@ node tools/check-tactics.mjs   # → traitExecutionerRefundsAp 必須失敗
 
 第一版驗「放棄回基地」的斷言就沒通過這關：它只驗到 `toHub` 有沒有清 `pending.recruit`，
 沒驗到 `ui.js` 那道 screen 判斷，所以拔掉 ui 的防線它照樣是綠的。後來補了第二條才涵蓋。
+
+**更危險的是「空過」**：驗敵方回合的那一段第一版放在修整測試之後，
+那時戰鬥早就結束、`screen` 是 `victory`，於是每一條都靠 `skipped` 短路成綠燈 ——
+把實作整段拔掉它照樣全過。修法有兩層：
+1. 加一條 `enemyPhaseProbeRan` 明確驗「這段真的跑到了」
+2. 讓那段**自己開一場乾淨的戰鬥**，不沿用被前面測試改壞的狀態
+
+沿用共用狀態的測試會偶發紅字，而且紅字講的還是假原因
+（顯示「敵方回合不可讀」，實際是「場上已經沒有敵人」）。
 
 ---
 
