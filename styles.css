@@ -201,6 +201,11 @@ button.big { padding: 15px; font-size: 16px; font-weight: 800; letter-spacing: 2
 .trait.bad { color: #ff9d9d; }
 .tag.clean { color: #8fffad; border-color: #4f9c6a; }
 
+/* 改裝目標切換：精英獎勵與補給讓玩家自己挑要餵誰 */
+.draft-target { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 4px; }
+.draft-target .mut { font-size: 11px; letter-spacing: .06em; }
+.draft-target button { flex: 1 1 auto; min-width: 0; padding: 6px 8px; font-size: 12px; }
+
 /* 編隊：選中的候補要一眼看得出來，因為這是出擊前唯一的決策 */
 .item.recruit { cursor: pointer; }
 .item.recruit:hover { border-color: var(--p); }

@@ -82,6 +82,7 @@ export function createUI(root, actions) {
     g.battle ? `${g.battle.turn}|${g.battle.phase}|${g.battle.selectedId}|${actableUnits(g).length}|${
       g.battle.units.filter((u) => u.alive).map((u) => `${u.x},${u.y},${u.hp},${(u.faceX ?? 0).toFixed(1)},${(u.faceY ?? 0).toFixed(1)}`).join('/')
     }` : '-',
+    // unitId 要在裡面：換改裝對象時卡片與標題都會變，少了它按了沒反應
     g.pending.draft ? `d${g.pending.draft.unitId}${g.pending.draft.cards.map((c) => c.id).join('')}` : '-',
     g.pending.event ? `e${g.pending.event.id}${g.pending.event.resolved ? 'r' : ''}` : '-',
     g.pending.shop ? `s${g.pending.shop.items.map((i) => (i.sold ? 1 : 0)).join('')}` : '-',
@@ -516,7 +517,8 @@ function victoryPanel(g) {
 function draftPanel(g) {
   const d = g.pending.draft;
   const u = g.squad.find((v) => v.id === d.unitId);
-  const source = { levelup: '升級', elite: '精英獎勵', supply: '補給改裝' }[d.source] || '改裝';
+  // supply 原本寫成「補給改裝」，接上後面的「改裝」會變成「補給改裝改裝」
+  const source = { levelup: '升級', elite: '精英獎勵', supply: '補給' }[d.source] || '';
   const cards = d.cards.map((c) => `
     <div class="item card-${rarityClass(c.r)}">
       <div class="item-head"><b>${esc(c.n)}</b><span class="tag">${esc(c.r)}</span></div>
@@ -524,9 +526,25 @@ function draftPanel(g) {
       ${btn(`draft:${c.id}`, '選擇')}
     </div>`).join('');
 
+  // 升級抽卡的對象是固定的（誰升級就是誰）；
+  // 精英獎勵與補給則讓玩家挑人，所以會帶 options。
+  const picker = d.options ? `
+      <div class="draft-target">
+        <span class="mut">改裝目標</span>
+        ${d.options.map((o) => {
+    const m = g.squad.find((v) => v.id === o.unitId);
+    if (!m) return '';
+    return btn(`draftTarget:${o.unitId}`, `${m.n} Lv.${m.lv}`, {
+      cls: o.unitId === d.unitId ? 'on' : '',
+    });
+  }).join('')}
+      </div>
+      <p class="hint">換人不會重抽卡片，每個人的三張是各自固定的。</p>` : '';
+
   return `
     <section class="highlight">
       <h2>${esc(source)}改裝 — ${esc(u?.n ?? '隊員')}</h2>
+      ${picker}
       <p class="hint">選一張，其餘捨棄。</p>
       <div class="list">${cards}</div>
     </section>`;

@@ -7,7 +7,7 @@ import {
   selectUnit, spendSkillPoint, pickDraftCard, chooseEventOption, closeEvent,
   buyShopItem, leaveShop, chooseSupply, closeSupply, setFocus, finishRun,
   serializeState, log, queueDraft, closeVictory,
-  openRecruit, toggleRecruit, confirmRecruit, buyRepair,
+  openRecruit, toggleRecruit, confirmRecruit, buyRepair, setDraftTarget,
 } from './engine.js';
 import { loadMeta, saveMeta, buyUpgrade, recordRun, resetMeta } from './meta.js';
 import { loadAssets, assetCount } from './assets.js';
@@ -194,6 +194,11 @@ const actions = {
     if (!res.ok) log(g, res.reason, true);
   },
   draft(cardId) { pickDraftCard(g, cardId); },
+  draftTarget(unitId) {
+    const res = setDraftTarget(g, unitId);
+    if (!res.ok) log(g, res.reason, true);
+    else playSfx('ui', 640);
+  },
 
   event(index) {
     const res = chooseEventOption(g, Number(index));

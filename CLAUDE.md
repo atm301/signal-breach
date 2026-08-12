@@ -26,7 +26,7 @@ npm run sim:long       # 跑 2000 場，數字比較穩
 node tools/simulate.mjs --meta=max --drop=dualperk,augment   # 關掉指定永久升級，量單項貢獻
 npm test               # Playwright 整合測試（35 項斷言 + console error 檢查）
 npm run check          # sim + test + audio + tactics 一起跑
-npm run check:tactics  # 戰術層 89 項：相剋／側背／區間／詞條／永久升級／編隊／修整／上色／敵方回合
+npm run check:tactics  # 戰術層 96 項：相剋／側背／區間／詞條／永久升級／編隊／修整／上色／敵方回合
 npm run shots          # 各畫面截圖到 test-output/shots/，要人眼看
 npm run assets         # 重切素材表 + 重做 OG 圖
 npm run assets:review  # 素材接觸表（深色底），檢查去背與損傷遞進
@@ -192,6 +192,7 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 | 調難度、改數值 | `src/data.js` 的 `TUNE`，然後跑 `npm run sim` |
 | 加新敵人 | `src/data.js` 的 `ENEMY_ARCHETYPES`（記得設 `tier` 和 `w`） |
 | 加新卡片 | `src/data.js` 的 `CARDS` + `src/engine.js` 的 `applyCard` |
+| 加新的抽卡來源 | 對象固定（誰升級就是誰）用 `queueDraft`；對象該由玩家挑用 `queueChoiceDraft`。⚠️ 不要用 `focusUnit` 當獎勵對象，它預設永遠是 `squad[0]` |
 | 加新事件 | `src/data.js` 的 `EVENTS`。效果型別看 `engine.js` 的 `applyEffects` |
 | 加新永久升級 | `src/data.js` 的 `META_UPGRADES` + `engine.js` 的 `rollOperative` / `createGame` |
 | 加新詞條 | `src/data.js` 的 `TRAITS`（強度寫 `v`，整數型加 `int: 1`）。純數值型寫 `stat(u, v)`；行為型在對應 hook 讀 `traitV(u, id)`，傷害型還要回報進 `traitMods` |

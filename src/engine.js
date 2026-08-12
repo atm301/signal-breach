@@ -836,6 +836,52 @@ export function queueDraft(g, unitId, source = 'levelup') {
   if (!g.pending.draft) openNextDraft(g);
 }
 
+// 「這次改裝要給誰」由玩家決定的抽卡（精英獎勵、補給）。
+//
+// 原本這兩個都直接發給 focusUnit ——
+// 而 focusUnit 預設是 squad[0]，玩家不去點小隊面板就永遠不會變。
+// 結果整場出擊的精英獎勵與補給卡全部靜靜地餵給同一個先鋒，
+// 另外兩個人的技能樹形同虛設，玩家還以為是遊戲壞了。
+//
+// 每個人的卡片在這裡就先抽好並各自存著，切換對象不會重抽 ——
+// 不然玩家可以左右來回切到抽出想要的卡為止。
+export function queueChoiceDraft(g, source) {
+  const living = squadAlive(g);
+  const options = living
+    .map((u) => {
+      const pool = cardPoolFor(g, u);
+      if (!pool.length) return null;
+      return { unitId: u.id, cards: g.rng.weightedDraw(pool, draftSize(g)) };
+    })
+    .filter(Boolean);
+  if (!options.length) return null;
+
+  // 預設落在等級最低的人身上：那通常就是最需要補的那個，
+  // 而且它不是「永遠同一個」，玩家不改也不會一直餵給先鋒。
+  const lowest = options.reduce((best, o) => {
+    const a = g.squad.find((u) => u.id === o.unitId);
+    const b = g.squad.find((u) => u.id === best.unitId);
+    return a.lv < b.lv ? o : best;
+  }, options[0]);
+
+  g.pending.draftQueue.push({
+    unitId: lowest.unitId, cards: lowest.cards, source, options,
+  });
+  if (!g.pending.draft) openNextDraft(g);
+  return lowest.unitId;
+}
+
+// 切換改裝對象。卡片是各自預抽好的，所以切來切去不會重抽。
+export function setDraftTarget(g, unitId) {
+  const d = g.pending.draft;
+  if (!d?.options) return { ok: false, reason: '這次改裝不能換對象' };
+  const opt = d.options.find((o) => o.unitId === unitId);
+  if (!opt) return { ok: false, reason: '這名幹員不在名單上' };
+  d.unitId = opt.unitId;
+  d.cards = opt.cards;
+  return { ok: true };
+}
+
 function openNextDraft(g) {
   const next = g.pending.draftQueue.shift();
   g.pending.draft = next ?? null;
@@ -1288,11 +1334,9 @@ export function closeVictory(g) {
   g.pending.victory = null;
 
   if (v.eliteReward) {
-    const target = focusUnit(g);
-    if (target) {
-      queueDraft(g, target.id, 'elite');
-      log(g, `精英目標清除，${target.n} 獲得一次改裝機會。`, true);
-    }
+    const id = queueChoiceDraft(g, 'elite');
+    const target = g.squad.find((u) => u.id === id);
+    if (target) log(g, `精英目標清除，獲得一次改裝機會（預設 ${target.n}，可換人）。`, true);
   }
 
   if (v.isBoss) {
@@ -1550,8 +1594,7 @@ export function chooseSupply(g, id) {
   if (!opt) return { ok: false, reason: '選項不存在' };
 
   if (opt.id === 'card') {
-    const u = focusUnit(g);
-    if (u) queueDraft(g, u.id, 'supply');
+    queueChoiceDraft(g, 'supply');
   } else {
     applyEffects(g, opt.fx);
   }

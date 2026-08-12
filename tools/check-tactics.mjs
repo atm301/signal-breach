@@ -733,6 +733,102 @@ check('actingEnemyIsMarked', aiPhase.sawActingMark,
 check('actingMarkClearedAfterPhase', aiPhase.clearedAfter,
   '敵方階段結束後標記沒清掉，會留在畫面上');
 
+// ---------------------------------------------------------------- 改裝對象
+//
+// 「升級改裝顯示的對象是不是都同一個？」—— 使用者問過。
+// 顯示本身是對的，但精英獎勵與補給原本都直接發給 focusUnit，
+// 而 focusUnit 預設是 squad[0]、玩家不去點小隊面板就永遠不會變 ——
+// 整場出擊的獎勵全部靜靜地餵給同一個先鋒。
+const draftTargeting = await page.evaluate(async () => {
+  const eng = await import('./src/engine.js');
+  const gm = window.__game();
+  if (!gm.squad.length) return { skipped: true };
+
+  // 1) 升級抽卡：誰升級就顯示誰
+  const headers = [];
+  for (const u of gm.squad) {
+    gm.pending.draft = null; gm.pending.draftQueue = [];
+    eng.queueDraft(gm, u.id, 'levelup');
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const h = [...document.querySelectorAll('#panel h2')].map((e) => e.textContent.trim())
+      .find((t) => t.includes('改裝')) || '';
+    headers.push({ want: u.n, header: h, ok: h.includes(u.n) });
+  }
+
+  // 2) 選擇型抽卡（精英/補給）：要能換人，而且換人不重抽
+  gm.pending.draft = null; gm.pending.draftQueue = [];
+  eng.queueChoiceDraft(gm, 'elite');
+  const d = gm.pending.draft;
+  const first = d?.unitId;
+  const firstCards = d?.cards.map((c) => c.id).join();
+  const other = d?.options?.find((o) => o.unitId !== first)?.unitId;
+  eng.setDraftTarget(gm, other);
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const switchedHeader = [...document.querySelectorAll('#panel h2')].map((e) => e.textContent.trim())
+    .find((t) => t.includes('改裝')) || '';
+  const otherCards = gm.pending.draft.cards.map((c) => c.id).join();
+  // 每個人要有自己獨立抽的一套。
+  // 不能斷言「兩套一定不同」—— 牌庫只有幾張，兩個人抽到同樣三張是合法的，
+  // 那樣寫會偶發紅字。要驗的是「切過去用的就是那個人預抽的那一套」。
+  const usesOwnSet = gm.pending.draft.cards
+    === d.options.find((o) => o.unitId === other)?.cards;
+  // 換回來，卡片必須跟第一次一模一樣（不能重抽）
+  eng.setDraftTarget(gm, first);
+  const backCards = gm.pending.draft.cards.map((c) => c.id).join();
+  const otherName = gm.squad.find((u) => u.id === other)?.n;
+
+  // 3) 預設對象不能永遠是 squad[0]
+  const defaults = [];
+  for (let i = 0; i < 8; i++) {
+    const test = eng.createGame({ seed: `draft-default-${i}` });
+    test.squad[i % test.squad.length].lv = 5; // 讓最低等級的人不固定
+    test.squad[(i + 1) % test.squad.length].lv = 3;
+    const id = eng.queueChoiceDraft(test, 'elite');
+    defaults.push(test.squad.findIndex((u) => u.id === id));
+  }
+  // 4) 每一種來源的標題都不能出現「改裝改裝」。
+  //    supply 的標籤原本寫成「補給改裝」，接上模板後面的「改裝」就重複了。
+  //    只驗 elite 的話抓不到，因為出問題的是另一個 source。
+  const labels = {};
+  for (const src of ['levelup', 'elite', 'supply']) {
+    gm.pending.draft = null; gm.pending.draftQueue = [];
+    if (src === 'levelup') eng.queueDraft(gm, gm.squad[0].id, 'levelup');
+    else eng.queueChoiceDraft(gm, src);
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    labels[src] = [...document.querySelectorAll('#panel h2')].map((e) => e.textContent.trim())
+      .find((t) => t.includes('改裝')) || '';
+  }
+
+  gm.pending.draft = null; gm.pending.draftQueue = [];
+  return {
+    headers,
+    labels,
+    hasOptions: !!d?.options && d.options.length > 1,
+    switchedName: otherName,
+    switchedHeaderOk: !!otherName && switchedHeader.includes(otherName),
+    cardsChangedOnSwitch: usesOwnSet,
+    noRerollOnSwitchBack: firstCards === backCards,
+    defaultSlots: defaults,
+    label: switchedHeader,
+  };
+});
+
+check('draftShowsCorrectUnit', draftTargeting.headers.every((h) => h.ok),
+  `升級抽卡顯示錯人：${JSON.stringify(draftTargeting.headers)}`);
+check('choiceDraftHasOptions', draftTargeting.hasOptions,
+  '精英獎勵應該可以選對象');
+check('choiceDraftSwitchesUnit', draftTargeting.switchedHeaderOk,
+  `換對象之後標題沒跟著改：${JSON.stringify(draftTargeting)}`);
+check('choiceDraftUsesOwnCardSet', draftTargeting.cardsChangedOnSwitch,
+  '切換對象後用的不是那個人預抽的牌組');
+check('choiceDraftNoReroll', draftTargeting.noRerollOnSwitchBack,
+  '切回來卡片變了 = 玩家可以左右來回切到抽出想要的卡為止');
+check('choiceDraftDefaultVaries', new Set(draftTargeting.defaultSlots).size > 1,
+  `預設對象永遠落在同一個位置：${JSON.stringify(draftTargeting.defaultSlots)}`);
+check('draftLabelNotDoubled',
+  Object.values(draftTargeting.labels).every((t) => t && !/改裝改裝/.test(t)),
+  `標題重複了：${JSON.stringify(draftTargeting.labels)}`);
+
 check('noConsoleErrors', errors.length === 0, errors.slice(0, 3).join(' | '));
 
 await browser.close();
