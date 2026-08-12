@@ -4,7 +4,7 @@
 
 import {
   GRID, FLOORS, TUNE, ROLES, PLAYER_TEMPLATES, ENEMY_ARCHETYPES, BOSSES,
-  TREE, PASS, CARDS, CARD_BY_ID, COVER_PATTERNS, EVENTS, SHOP_SERVICES,
+  TREE, PASS, CARDS, CARD_BY_ID, COVER_PATTERNS, EVENTS, SHOP_SERVICES, SKILLS, STATUS,
   RARITY, coresEarned, elementMultiplier,
   TRAITS, GOOD_TRAITS, BAD_TRAITS, CALLSIGNS, traitV, hasTrait,
 } from './data.js';
@@ -81,7 +81,10 @@ export function rollOperative(rng, meta, template, lookRng = rng, opts = {}) {
     lv: 1,
     xp: 0,
     sp: 0,
-    path: null,
+    path: t.path ?? null,
+    cool: 0, // 冷卻縮減（散熱超載 / 超載充能）
+    cd: {}, // 各技能剩餘冷卻
+    st: {}, // 狀態效果剩餘回合
     pass: [],
     ul: {},
     alive: 1,
@@ -128,6 +131,14 @@ export function rollOperative(rng, meta, template, lookRng = rng, opts = {}) {
   u.map = clamp(u.ap, 2, TUNE.AP_CAP);
   u.hp = u.mhp;
   u.ap = 0;
+
+  // 路線的第一階（招牌主動技能）出場就送，不用花技能點。
+  // 不送的話新玩家整場只會解鎖一個節點，永遠碰不到技能系統。
+  for (const node of TREE[u.path] ?? []) {
+    if (!node.free) continue;
+    u.ul[node.lv] = 1;
+    if (!u.pass.includes(node.id)) u.pass.push(node.id);
+  }
   return u;
 }
 
@@ -169,7 +180,7 @@ export function createGame({ seed, meta = { upgrades: {} } } = {}) {
     recruits: [],
     squad: [],
     credits: metaLevel(meta, 'credits') * 25,
-    stats: { depth: 0, kills: 0, eliteKills: 0, battles: 0, turns: 0 },
+    stats: { depth: 0, kills: 0, eliteKills: 0, battles: 0, turns: 0, skillUses: 0 },
     flags: {
       weaken: 0,
       reviveLeft: metaLevel(meta, 'revive') >= 1 ? 1 : 0,
@@ -402,6 +413,10 @@ export function startBattle(g, node) {
     u.attacked = 0;
     u.faceX = 0;
     u.faceY = -1;
+    // 冷卻與狀態不跨場。跨場的話「上一場最後一回合放了技能」會決定
+    // 這一場第一回合能不能放，玩家完全無從預期。
+    u.cd = {};
+    u.st = {};
   });
 
   g.battle = {
@@ -416,6 +431,7 @@ export function startBattle(g, node) {
     selectedId: alive[0]?.id ?? null,
     aiQueue: [],
     actingId: null, // 敵方階段中正在行動的那一隻，給渲染層標示用
+    armedSkill: null, // 玩家點了技能、正在等他指定目標
     downed: [],
   };
   g.flags.weaken = 0; // 一次性 debuff，用掉就清
@@ -474,7 +490,7 @@ function adjacentCount(g, u, team) {
 //
 // 新增詞條時：修正一律走這裡，而且一定要 push 進 traitMods。
 // 沒 push 的話玩家看得到數字變了卻不知道為什麼，那比沒有這個詞條還糟。
-export function damageBreakdown(g, attacker, target) {
+export function damageBreakdown(g, attacker, target, skillMult = 1) {
   const d = dist(attacker.x, attacker.y, target.x, target.y);
   const bonusMelee = d === 1 && attacker.pass.includes(PASS.A3) ? 1 : 0;
   const bonusRanged = d >= 2 && attacker.pass.includes(PASS.R5) ? 1 : 0;
@@ -541,7 +557,24 @@ export function damageBreakdown(g, attacker, target) {
     mul('brittle', 1 + traitV(target, 'brittle'));
   }
 
-  const raw = attacker.atk + bonusMelee + bonusRanged - cover;
+  // 狀態效果與技能倍率也走同一條乘算鏈，並且一樣要進 traitMods ——
+  // 預測卡上看不到「因為它被標定了所以多打 30%」的話，標定就白做了。
+  if (hasStatus(target, 'marked')) {
+    traitMult *= 1 + SKILLS.mark.v;
+    traitMods.push({ n: STATUS.marked.n, m: 1 + SKILLS.mark.v, good: 1 });
+  }
+  // 護盾投射：相鄰有解鎖 S4 的隊友時減傷 1
+  let aegis = 0;
+  if (battleUnits(g).some((o) => (
+    o.alive && o !== target && o.tm === target.tm
+    && o.pass?.includes(PASS.S4) && dist(o.x, o.y, target.x, target.y) === 1
+  ))) {
+    aegis = 1;
+    traitMods.push({ n: '護盾投射', m: -1, good: 0 });
+  }
+  if (skillMult !== 1) traitMult *= skillMult;
+
+  const raw = attacker.atk + bonusMelee + bonusRanged - cover - aegis;
   const mid = Math.max(1, raw * elem * flankMult * traitMult);
 
   // 穩定性越高，區間越窄。stab 100 = 完全確定，stab 0 = 上下浮動 45%
@@ -585,8 +618,8 @@ export function damageOf(g, attacker, target) {
 }
 
 // 實際擲骰。用 g.rng 才能被種子重現，也才存得進存檔。
-export function rollDamage(g, attacker, target) {
-  const b = damageBreakdown(g, attacker, target);
+export function rollDamage(g, attacker, target, mult = 1) {
+  const b = damageBreakdown(g, attacker, target, mult);
   const dmg = b.max <= b.min ? b.min : b.min + g.rng.int(b.max - b.min + 1);
   return { ...b, dmg };
 }
@@ -632,19 +665,23 @@ export function moveUnit(g, u, x, y) {
   return { ok: true, cost };
 }
 
-export function attackUnit(g, attacker, target) {
+// opts.free = 技能自己扣 AP 與攻擊次數，這裡不要重複扣也不要檢查射程
+// opts.mult = 技能的傷害倍率；opts.label = log 上顯示的招式名
+export function attackUnit(g, attacker, target, opts = {}) {
   if (!attacker.alive || !target.alive) return { ok: false, reason: '單位已陣亡' };
-  if (attacker.ap < 1) return { ok: false, reason: 'AP 不足' };
-  if (attacker.attacked >= TUNE.ATTACKS_PER_TURN) return { ok: false, reason: '本回合已經攻擊過了' };
-  const d = dist(attacker.x, attacker.y, target.x, target.y);
-  if (d > attacker.rg) return { ok: false, reason: '超出射程' };
-
-  attacker.ap -= 1;
-  attacker.attacked = (attacker.attacked || 0) + 1;
+  if (!opts.free) {
+    if (attacker.ap < 1) return { ok: false, reason: 'AP 不足' };
+    if (attacker.attacked >= TUNE.ATTACKS_PER_TURN) return { ok: false, reason: '本回合已經攻擊過了' };
+    if (hasStatus(attacker, 'stunned')) return { ok: false, reason: '武器系統被干擾' };
+    const d = dist(attacker.x, attacker.y, target.x, target.y);
+    if (d > attacker.rg) return { ok: false, reason: '超出射程' };
+    attacker.ap -= 1;
+    attacker.attacked = (attacker.attacked || 0) + 1;
+  }
   attacker.fireMs = 160;
   faceToward(attacker, target.x, target.y);
 
-  const roll = rollDamage(g, attacker, target);
+  const roll = rollDamage(g, attacker, target, opts.mult ?? 1);
   const dmg = roll.dmg;
   target.hp -= dmg;
   target.hurtMs = 240;
@@ -681,7 +718,8 @@ export function attackUnit(g, attacker, target) {
   if (roll.elem > 1) tags.push('屬性剋制');
   if (roll.elem < 1) tags.push('屬性被抗');
   if (roll.flankLabel) tags.push(roll.flankLabel);
-  log(g, `${attacker.n} 攻擊 ${target.n}，造成 ${dmg} 點傷害${tags.length ? `（${tags.join('、')}）` : ''}。`);
+  const verb = opts.label ? `使用「${opts.label}」對` : '攻擊';
+  log(g, `${attacker.n} ${verb} ${target.n}，造成 ${dmg} 點傷害${tags.length ? `（${tags.join('、')}）` : ''}。`);
 
   let killed = false;
   if (target.hp <= 0) {
@@ -721,6 +759,17 @@ export function tapBoard(g, x, y) {
   const b = g.battle;
   if (!b || b.phase !== 'player') return { ok: false, reason: '目前不是我方回合' };
   if (g.pending.draft) return { ok: false, reason: '請先完成升級抽卡' };
+
+  // 技能已就緒時，這一下點擊是「指定目標」而不是一般的走/打。
+  // 這是全遊戲唯一的模式切換，而且是玩家自己按技能才進來的 ——
+  // 不像原本那個「移動/攻擊」模式是每次出手都要先切。
+  if (b.armedSkill) {
+    const caster = unitById(g, b.armedSkill.unitId);
+    const id = b.armedSkill.id;
+    b.armedSkill = null;
+    if (!caster || !caster.alive) return { ok: false, reason: '施放者已陣亡' };
+    return castSkill(g, caster, id, x, y);
+  }
 
   const clicked = unitAt(g, x, y);
   if (clicked && clicked.tm === 'p' && clicked.alive) {
@@ -871,6 +920,32 @@ export function queueChoiceDraft(g, source) {
   return lowest.unitId;
 }
 
+// 點技能按鈕：進入「等你指定目標」的狀態。再按一次或按別的就取消。
+export function armSkill(g, unitId, id) {
+  const b = g.battle;
+  if (!b || b.phase !== 'player') return { ok: false, reason: '目前不是我方回合' };
+  const u = unitById(g, unitId);
+  if (!u) return { ok: false, reason: '找不到單位' };
+  if (b.armedSkill?.unitId === unitId && b.armedSkill.id === id) {
+    b.armedSkill = null; // 再按一次 = 取消
+    return { ok: true, armed: false };
+  }
+  const st = skillState(g, u, id);
+  if (!st.ok) return { ok: false, reason: st.reason };
+  // 自身型技能沒有目標可指定，直接放
+  if (SKILLS[id].target === 'self') {
+    b.armedSkill = null;
+    return castSkill(g, u, id, u.x, u.y);
+  }
+  b.armedSkill = { unitId, id };
+  b.selectedId = unitId;
+  return { ok: true, armed: true };
+}
+
+export function cancelSkill(g) {
+  if (g.battle) g.battle.armedSkill = null;
+}
+
 // 切換改裝對象。卡片是各自預抽好的，所以切來切去不會重抽。
 export function setDraftTarget(g, unitId) {
   const d = g.pending.draft;
@@ -915,14 +990,177 @@ export function applyCard(g, u, id) {
       u.ap = Math.min(u.map, u.ap + 1);
       break;
     case 'sp': u.sp += 1; break;
-    case 'pa': if (!u.path) { u.path = 'ASSAULT'; unlockNode(g, u, 2); } break;
-    case 'pr': if (!u.path) { u.path = 'RECON'; unlockNode(g, u, 2); } break;
+    case 'sp2': u.sp += 2; break;
+    case 'stab': u.stab = Math.min(98, u.stab + 12); break;
+    case 'cool': u.cool = (u.cool || 0) + 1; break;
     case 'ul': { const n = nextTreeNode(u); if (n) unlockNode(g, u, n.lv); break; }
     default: break;
   }
 }
 
 // ---------------------------------------------------------------- 技能樹
+
+// ---------------------------------------------------------------- 主動技能
+
+// 這名單位已解鎖的主動技能 id
+export function skillsOf(u) {
+  if (!u?.path) return [];
+  return TREE[u.path].filter((n) => n.skill && u.ul[n.lv]).map((n) => n.skill);
+}
+
+// 這個技能的實際冷卻回合。散熱超載 / 超載充能會把它壓低，但最少 1。
+export function skillCd(u, id) {
+  return Math.max(1, SKILLS[id].cd - (u.cool || 0));
+}
+
+// 現在能不能放。回傳的 reason 直接顯示給玩家看，所以要講人話。
+export function skillState(g, u, id) {
+  const s = SKILLS[id];
+  const left = u.cd?.[id] ?? 0;
+  if (!s) return { ok: false, reason: '沒有這個技能', left: 0 };
+  if (!skillsOf(u).includes(id)) return { ok: false, reason: '尚未解鎖', left: 0 };
+  if (g.battle?.phase !== 'player') return { ok: false, reason: '不是我方回合', left };
+  if (left > 0) return { ok: false, reason: `冷卻中（還要 ${left} 回合）`, left };
+  if (u.ap < (s.ap ?? 1)) return { ok: false, reason: `AP 不足（需要 ${s.ap ?? 1}）`, left };
+  if (s.attack && u.attacked >= TUNE.ATTACKS_PER_TURN) {
+    return { ok: false, reason: '本回合已經攻擊過了', left };
+  }
+  if (!validSkillTiles(g, u, id).length) return { ok: false, reason: '射程內沒有目標', left };
+  return { ok: true, reason: '', left };
+}
+
+// 可以指定的格子。UI 直接拿這個畫高亮，castSkill 也用同一份判定 ——
+// 兩邊分開寫的話一定會出現「畫得亮但點下去說不行」。
+export function validSkillTiles(g, u, id) {
+  const s = SKILLS[id];
+  if (!s || !g.battle) return [];
+  if (s.target === 'self') {
+    // 自身型：要有東西打得到才算有目標
+    return aliveOf(g, u.tm === 'p' ? 'e' : 'p')
+      .some((f) => dist(u.x, u.y, f.x, f.y) <= s.range) ? [{ x: u.x, y: u.y }] : [];
+  }
+  const out = [];
+  for (let y = 0; y < GRID; y++) {
+    for (let x = 0; x < GRID; x++) {
+      if (dist(u.x, u.y, x, y) > s.range) continue;
+      const at = unitAt(g, x, y);
+      if (s.target === 'enemy' && at && at.tm !== u.tm) out.push({ x, y });
+      if (s.target === 'ally' && at && at.tm === u.tm) out.push({ x, y });
+      if (s.target === 'empty' && !at) out.push({ x, y });
+    }
+  }
+  return out;
+}
+
+// 突進斬要先貼過去，所以得找一個「緊鄰目標而且空著」的落點
+function dashSpot(g, u, target) {
+  const cands = [[0, -1], [0, 1], [-1, 0], [1, 0]]
+    .map(([dx, dy]) => ({ x: target.x + dx, y: target.y + dy }))
+    .filter((p) => p.x >= 0 && p.x < GRID && p.y >= 0 && p.y < GRID)
+    .filter((p) => (p.x === u.x && p.y === u.y) || !unitAt(g, p.x, p.y));
+  if (!cands.length) return null;
+  // 已經站在旁邊就不要多跑一步
+  return cands.find((p) => p.x === u.x && p.y === u.y)
+    ?? cands.sort((a, b) => dist(u.x, u.y, a.x, a.y) - dist(u.x, u.y, b.x, b.y))[0];
+}
+
+export function castSkill(g, u, id, x, y) {
+  const st = skillState(g, u, id);
+  if (!st.ok) return { ok: false, reason: st.reason };
+  const s = SKILLS[id];
+  const tiles = validSkillTiles(g, u, id);
+  const tx = s.target === 'self' ? u.x : x;
+  const ty = s.target === 'self' ? u.y : y;
+  if (!tiles.some((t) => t.x === tx && t.y === ty)) return { ok: false, reason: '不是有效目標' };
+
+  const target = unitAt(g, tx, ty);
+  let result = { ok: true, killed: 0 };
+
+  switch (id) {
+    case 'charge': {
+      const spot = dashSpot(g, u, target);
+      if (!spot) return { ok: false, reason: '目標旁邊沒有落腳點' };
+      if (spot.x !== u.x || spot.y !== u.y) {
+        faceToward(u, spot.x, spot.y);
+        u.x = spot.x; u.y = spot.y;
+        fx(g, { type: 'beam', from: { x: u.x, y: u.y }, to: { x: tx, y: ty }, color: '#ffd980', life: 160 });
+      }
+      const r = attackUnit(g, u, target, { mult: s.mult, label: s.n, free: true });
+      result.killed = r.killed ? 1 : 0;
+      break;
+    }
+    case 'shockwave': {
+      const foes = aliveOf(g, u.tm === 'p' ? 'e' : 'p')
+        .filter((f) => dist(u.x, u.y, f.x, f.y) <= s.range);
+      for (const f of foes) {
+        const r = attackUnit(g, u, f, { mult: s.mult, label: s.n, free: true });
+        if (r.killed) result.killed++;
+      }
+      fx(g, { type: 'burst', x: u.x, y: u.y, color: '#ffd980', life: 380, size: 2.2 });
+      break;
+    }
+    case 'mark':
+      applyStatus(g, target, 'marked', s.turns);
+      log(g, `${u.n} 標定了 ${target.n}（${s.turns} 回合內全隊對它傷害 +${Math.round(s.v * 100)}%）。`, true);
+      fx(g, { type: 'pulse', x: tx, y: ty, color: '#ffd980', life: 420, size: 1.8 });
+      break;
+    case 'blink':
+      faceToward(u, tx, ty);
+      fx(g, { type: 'burst', x: u.x, y: u.y, color: '#8fa4d8', life: 300, size: 1.4 });
+      u.x = tx; u.y = ty;
+      fx(g, { type: 'burst', x: tx, y: ty, color: '#8fa4d8', life: 300, size: 1.4 });
+      log(g, `${u.n} 相位轉移到 (${tx + 1},${ty + 1})。`);
+      break;
+    case 'patch': {
+      const amt = Math.max(1, Math.round(target.mhp * s.v));
+      const before = target.hp;
+      target.hp = Math.min(target.mhp, target.hp + amt);
+      fx(g, { type: 'pulse', x: tx, y: ty, color: '#8fffad', life: 420, size: 1.6 });
+      log(g, `${u.n} 修補了 ${target.n}，+${target.hp - before} HP。`, true);
+      break;
+    }
+    case 'jam': {
+      const r = attackUnit(g, u, target, { mult: s.mult, label: s.n, free: true });
+      result.killed = r.killed ? 1 : 0;
+      if (target.alive) {
+        applyStatus(g, target, 'stunned', s.turns);
+        log(g, `${target.n} 的武器系統被干擾，下回合無法攻擊。`, true);
+      }
+      break;
+    }
+    default:
+      return { ok: false, reason: '這個技能還沒實作' };
+  }
+
+  g.stats.skillUses = (g.stats.skillUses ?? 0) + 1;
+  u.ap -= (s.ap ?? 1);
+  if (s.attack) u.attacked = (u.attacked || 0) + 1;
+  u.cd = u.cd || {};
+  u.cd[id] = skillCd(u, id) + 1; // +1 是因為這一回合結束時會先扣一次
+  sfx(g, 'level', 520);
+
+  checkBattleEnd(g);
+  if (u.tm === 'p' && g.battle?.phase === 'player') autoSelectNext(g, u);
+  return result;
+}
+
+export function applyStatus(g, u, id, turns) {
+  u.st = u.st || {};
+  u.st[id] = Math.max(u.st[id] ?? 0, turns);
+}
+
+export const hasStatus = (u, id) => (u?.st?.[id] ?? 0) > 0;
+
+// 冷卻與狀態一起在我方回合開始時遞減。
+// 敵方單位的狀態也在這裡減，這樣「干擾一回合」對玩家來說就是
+// 「敵人接下來這一次行動不會攻擊」，數得出來。
+function tickCooldowns(g) {
+  for (const u of battleUnits(g)) {
+    if (!u.alive) continue;
+    if (u.cd) for (const k of Object.keys(u.cd)) u.cd[k] = Math.max(0, u.cd[k] - 1);
+    if (u.st) for (const k of Object.keys(u.st)) u.st[k] = Math.max(0, u.st[k] - 1);
+  }
+}
 
 export function nextTreeNode(u) {
   if (!u.path) return null;
@@ -936,6 +1174,7 @@ function applyPassiveImmediate(g, u, id) {
   }
   if (id === PASS.R2) u.rg = Math.min(TUNE.RG_CAP, u.rg + 1);
   if (id === PASS.A4) { u.mhp += 3; u.hp = Math.min(u.mhp, u.hp + 3); }
+  if (id === PASS.S6) u.cool = (u.cool || 0) + 1;
 }
 
 export function unlockNode(g, u, lv) {
@@ -1061,8 +1300,12 @@ function actEnemy(g, u) {
     target = bestTarget(g, u, living);
   }
 
-  if (target && u.alive && !u.attacked && u.ap >= 1 && dist(u.x, u.y, target.x, target.y) <= u.rg) {
+  // 被電磁干擾的單位這一回合不能開火（但還是會走位，不然玩家看不出它被癱瘓了）
+  if (target && u.alive && !u.attacked && u.ap >= 1
+      && !hasStatus(u, 'stunned') && dist(u.x, u.y, target.x, target.y) <= u.rg) {
     attackUnit(g, u, target);
+  } else if (hasStatus(u, 'stunned')) {
+    log(g, `${u.n} 受到干擾，無法開火。`);
   }
   u.ap = 0; // 一回合只行動一次
 }
@@ -1115,10 +1358,21 @@ function beginPlayerTurn(g) {
 
   b.phase = 'player';
   b.actionMode = 'move';
+  b.armedSkill = null;
+  tickCooldowns(g);
   for (const u of battleUnits(g)) {
     if (!u.alive) continue;
     u.ap = u.map;
     u.attacked = 0;
+    // 維修協定：相鄰隊友每回合回一點
+    if (u.pass?.includes(PASS.S2)) {
+      for (const mate of battleUnits(g)) {
+        if (!mate.alive || mate === u || mate.tm !== u.tm) continue;
+        if (dist(mate.x, mate.y, u.x, u.y) !== 1 || mate.hp >= mate.mhp) continue;
+        mate.hp = Math.min(mate.mhp, mate.hp + 1);
+        fx(g, { type: 'pulse', x: mate.x, y: mate.y, color: '#8fffad', life: 220, size: 1 });
+      }
+    }
     // 回合開始的持續效果。內傷永遠留 1 HP ——
     // 「自己流血流到死」對玩家來說是最沒有回饋的死法，那不是取捨是懲罰。
     if (hasTrait(u, 'regen') && u.hp < u.mhp) {

@@ -3,10 +3,11 @@
 
 import {
   TREE, META_UPGRADES, NODE_TYPES, FLOORS, CREDITS, CREDITS_META, ELEMENTS, TUNE, TRAITS, traitV,
+  SKILLS, PATH_NAMES, treeNodeInfo,
 } from './data.js';
 import {
   availableNodes, squadAlive, xpToNext, unitById, actableUnits, damageBreakdown, dist,
-  repairOptions,
+  repairOptions, skillsOf, skillState, skillCd,
 } from './engine.js';
 import { upgradeList } from './meta.js';
 import { playSfx } from './audio.js';
@@ -79,8 +80,11 @@ export function createUI(root, actions) {
     g.squad.map((u) => `${u.hp}/${u.mhp}|${u.ap}/${u.map}|${u.attacked}|${u.lv}|${u.sp}|${u.atk}|${u.rg}|${u.stab}|${u.path}|${Object.keys(u.ul).join('')}|${JSON.stringify(u.rep ?? 0)}|${u.alive}`).join(';'),
     // 位置與朝向要進 signature：傷害預測表會因為誰站哪、面朝哪而整張改寫，
     // 只比 HP/AP 的話，敵人移動完預測值是舊的 —— 那比沒有預測更糟。
+    // 冷卻、狀態、已就緒的技能也要進來：技能列的按鈕文字全靠它們算出來
     g.battle ? `${g.battle.turn}|${g.battle.phase}|${g.battle.selectedId}|${actableUnits(g).length}|${
-      g.battle.units.filter((u) => u.alive).map((u) => `${u.x},${u.y},${u.hp},${(u.faceX ?? 0).toFixed(1)},${(u.faceY ?? 0).toFixed(1)}`).join('/')
+      g.battle.armedSkill ? `${g.battle.armedSkill.unitId}${g.battle.armedSkill.id}` : '-'
+    }|${
+      g.battle.units.filter((u) => u.alive).map((u) => `${u.x},${u.y},${u.hp},${(u.faceX ?? 0).toFixed(1)},${(u.faceY ?? 0).toFixed(1)},${JSON.stringify(u.cd ?? 0)},${JSON.stringify(u.st ?? 0)}`).join('/')
     }` : '-',
     // unitId 要在裡面：換改裝對象時卡片與標題都會變，少了它按了沒反應
     g.pending.draft ? `d${g.pending.draft.unitId}${g.pending.draft.cards.map((c) => c.id).join('')}` : '-',
@@ -362,6 +366,7 @@ function battlePanel(g) {
         ${isPlayer ? `還能行動：<b>${pending}</b> / ${squadAlive(g).length}` : (b.phase === 'ai' ? '敵方行動中' : '結算中')}
         ${sel ? `　｜　選定 ${esc(sel.n)} ${elTag(sel)}（AP ${sel.ap}/${sel.map}${sel.attacked ? '・已出手' : ''}）` : ''}
       </p>
+      ${skillBar(g, sel, isPlayer)}
       ${forecastList(g, sel, isPlayer)}
       <p class="hint">
         <b>點敵人就打，點空地就走</b>，不用先切模式。攻擊完會自動跳到下一個單位。<br>
@@ -441,6 +446,40 @@ function repairSection(g) {
       <p class="hint">針對個人的項目會套用到小隊面板裡目前選定的幹員。</p>
       <div class="list">${rows}</div>
     </section>`;
+}
+
+// 選定單位的主動技能列。
+//
+// 冷卻剩幾回合要直接寫在按鈕上，不能只是變灰 ——
+// 「還要 2 回合」跟「這場不能用了」對決策是完全不同的兩件事。
+function skillBar(g, sel, isPlayer) {
+  if (!sel) return '';
+  const ids = skillsOf(sel);
+  if (!ids.length) return '';
+  const armed = g.battle?.armedSkill;
+
+  const rows = ids.map((id) => {
+    const s = SKILLS[id];
+    const st = skillState(g, sel, id);
+    const on = armed?.unitId === sel.id && armed.id === id;
+    const label = st.left > 0 ? `${s.n}　冷卻 ${st.left}` : s.n;
+    return `
+      <div class="skill${st.ok ? '' : ' down'}${on ? ' armed' : ''}">
+        <div class="skill-head">
+          <b>${esc(s.n)}</b>
+          <span class="tag">CD ${skillCd(sel, id)}・${s.ap} AP${s.attack ? '・算攻擊' : ''}</span>
+        </div>
+        <div class="item-body">${esc(s.d)}</div>
+        ${btn(`skill:${sel.id}:${id}`, on ? '點棋盤指定目標（再按取消）' : (st.ok ? `使用 ${label}` : st.reason), {
+    disabled: !isPlayer || (!st.ok && !on),
+    cls: on ? 'primary' : '',
+  })}
+      </div>`;
+  }).join('');
+
+  return `<div class="skills">
+      <div class="fc-head">主動技能（${esc(PATH_NAMES[sel.path] ?? '')}路線）</div>${rows}
+    </div>`;
 }
 
 // 射程內目標的傷害預測表。
@@ -662,7 +701,7 @@ function squadPanel(g) {
       <div class="item${focus}${dead ? ' down' : ''}" data-act="focus:${u.id}">
         <div class="item-head">
           <b>${esc(u.n)}</b>
-          <span class="tag">Lv.${u.lv}${u.path ? ` ${u.path === 'ASSAULT' ? '強襲' : '偵察'}` : ''}</span>
+          <span class="tag">Lv.${u.lv}${u.path ? ` ${esc(PATH_NAMES[u.path] ?? u.path)}` : ''}</span>
         </div>
         <div class="item-body">
           ${pos}HP ${u.hp}/${u.mhp} ｜ AP ${u.ap}/${u.map} ${fired}<br>
@@ -680,22 +719,34 @@ function squadPanel(g) {
 function treePanel(g) {
   const u = g.squad.find((v) => v.id === g.focusId);
   if (!u) return '<section><h2>技能樹</h2><div class="item">尚未選定隊員。</div></section>';
-  if (!u.path) {
-    return `<section><h2>技能樹 — ${esc(u.n)}</h2><div class="item">尚未選定路線。透過升級抽卡取得「路線」卡片才會開啟。</div></section>`;
-  }
+  if (!u.path) return `<section><h2>技能樹 — ${esc(u.n)}</h2><div class="item">這名幹員沒有路線。</div></section>`;
 
+  // 五階一次全部列出來（包含還買不起的），玩家才能先規劃 build。
+  // 這是《最後的咒語》的做法：看得到終點才有規劃可言。
   const rows = TREE[u.path].map((n) => {
+    const info = treeNodeInfo(n);
     const unlocked = !!u.ul[n.lv];
-    const canBuy = !unlocked && u.lv >= n.lv && u.sp > 0;
+    const levelOk = u.lv >= n.lv;
+    const canBuy = !unlocked && levelOk && u.sp > 0;
+    const why = unlocked ? '已解鎖'
+      : !levelOk ? `需要 Lv.${n.lv}`
+        : u.sp <= 0 ? '技能點不足' : '解鎖（1 SP）';
     return `
-      <div class="item${unlocked ? ' done' : ''}">
-        <div class="item-head"><b>${esc(n.n)}</b><span class="tag">Lv.${n.lv}</span></div>
-        <div class="item-body">${esc(n.d)}</div>
-        ${btn(`tree:${u.id}:${n.lv}`, unlocked ? '已解鎖' : `解鎖（1 SP）`, { disabled: !canBuy })}
+      <div class="item${unlocked ? ' done' : ''}${levelOk ? '' : ' down'}">
+        <div class="item-head">
+          <b>${info.skill ? '◆ ' : ''}${esc(info.n)}</b>
+          <span class="tag">${info.skill ? '主動・' : '被動・'}Lv.${n.lv}</span>
+        </div>
+        <div class="item-body">${esc(info.d)}</div>
+        ${btn(`tree:${u.id}:${n.lv}`, why, { disabled: !canBuy })}
       </div>`;
   }).join('');
 
-  return `<section><h2>技能樹 — ${esc(u.n)}（SP ${u.sp}）</h2><div class="list">${rows}</div></section>`;
+  return `<section>
+      <h2>技能樹 — ${esc(u.n)}（${esc(PATH_NAMES[u.path])}・SP ${u.sp}）</h2>
+      <p class="hint">路線由原型決定：先鋒走強襲、狙擊走偵察、工兵走支援。◆ 是戰鬥中可以發動的主動技能。</p>
+      <div class="list">${rows}</div>
+    </section>`;
 }
 
 function logPanel(g) {

@@ -4,6 +4,7 @@
 import { GRID, FLOORS, NODE_TYPES, ELEMENTS } from './data.js';
 import {
   key, dist, reachableTiles, aliveOf, unitById, availableNodes, damageBreakdown,
+  validSkillTiles,
 } from './engine.js';
 import { unitSprite, coverSprite, nodeIcon, uiSprite } from './assets.js';
 
@@ -225,6 +226,27 @@ function drawHighlights(ctx, g, cell) {
   ctx.lineWidth = 3;
   ctx.strokeRect(PAD + u.x * cell + 4, PAD + u.y * cell + 4, cell - 8, cell - 8);
 
+  // 技能已就緒：只畫技能的合法目標，把平常的移動/攻擊提示收掉。
+  // 兩套同時畫的話玩家分不出「這格是走過去還是放技能」——
+  // 而這是全遊戲唯一一次進入模式，畫面必須明確告訴他現在在做什麼。
+  if (b.armedSkill && b.armedSkill.unitId === u.id) {
+    const tiles = validSkillTiles(g, u, b.armedSkill.id);
+    const t = (performance.now?.() ?? Date.now()) / 400;
+    const pulse = 0.18 + Math.sin(t) * 0.08;
+    for (const p of tiles) {
+      const px = PAD + p.x * cell;
+      const py = PAD + p.y * cell;
+      ctx.fillStyle = `rgba(255,217,128,${pulse})`;
+      ctx.fillRect(px + 5, py + 5, cell - 10, cell - 10);
+      ctx.strokeStyle = '#ffd980';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([cell * 0.12, cell * 0.08]);
+      ctx.strokeRect(px + 5, py + 5, cell - 10, cell - 10);
+      ctx.setLineDash([]);
+    }
+    return;
+  }
+
   // 移動範圍與可攻擊目標「同時」顯示。
   // 原本要切模式才看得到另一半，等於逼玩家為了看資訊多按一次。
   ctx.fillStyle = 'rgba(113,217,147,.16)';
@@ -401,6 +423,39 @@ function drawUnits(ctx, g, cell, time) {
       ctx.fillText(el.short, ex, ey + er * 0.06);
       ctx.textAlign = 'left';
       ctx.textBaseline = 'alphabetic';
+    }
+
+    // 狀態標記。畫在代幣正下方、血條上面 ——
+    // 標定與干擾都會直接改變「這回合該打誰」，看不到就等於技能沒放。
+    const sts = Object.entries(u.st ?? {}).filter(([, n]) => n > 0);
+    if (sts.length) {
+      const sw = cell * 0.13;
+      let sx = cx - ((sts.length - 1) * sw * 1.25) / 2;
+      const sy = cy + outerR * 0.98;
+      for (const [id, turns] of sts) {
+        ctx.beginPath();
+        ctx.arc(sx, sy, sw * 0.5, 0, Math.PI * 2);
+        ctx.fillStyle = id === 'stunned' ? '#8fa4d8' : '#ffd980';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(9,17,23,.9)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = '#0f1a21';
+        ctx.font = `800 ${Math.round(sw * 0.72)}px ${FONT}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(id === 'stunned' ? '干' : '標', sx, sy + sw * 0.03);
+        // 剩餘回合寫在右上角，玩家要能數
+        ctx.font = `800 ${Math.round(sw * 0.55)}px ${FONT}`;
+        ctx.fillStyle = '#dfe9f0';
+        ctx.strokeStyle = 'rgba(9,17,23,.9)';
+        ctx.lineWidth = 2.5;
+        ctx.strokeText(String(turns), sx + sw * 0.52, sy - sw * 0.42);
+        ctx.fillText(String(turns), sx + sw * 0.52, sy - sw * 0.42);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        sx += sw * 1.25;
+      }
     }
 
     // 血條

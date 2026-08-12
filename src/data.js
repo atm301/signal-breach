@@ -39,7 +39,7 @@ export const TUNE = {
   BASE_SPREAD: 0.45,
   // 相剋與側背讓玩家的期望傷害大幅上升（最高 1.35 x 1.45 = 1.96 倍），
   // 敵人血量要跟上，否則戰鬥會縮回 3 回合以下、通關率飆到 76%。
-  ENEMY_HP_MULT: 1.35,
+  ENEMY_HP_MULT: 1.63,
 
   // ── 隨機幹員 ──────────────────────────────────────────
   RECRUIT_POOL: 5, // 每次出擊抽這麼多名候補
@@ -87,11 +87,15 @@ export const ROLES = {
 // 這樣「穩定性」才是可以取捨的資源，而不是一視同仁的雜訊。
 // skins = 同一個原型的可用外觀。key 是玩法身分，skin 只是長相，
 // 兩者分開才不會「換一張圖就動到平衡」。
+// path 直接綁在原型上：先鋒→強襲、狙擊→偵察、工兵→支援。
+// 這樣「每個角色會有不同技能」才成立，也不會出現「沒抽到路線卡整棵樹鎖住」。
 export const PLAYER_TEMPLATES = [
-  { key: 'vanguard', r: 'V', n: '先鋒', hp: 18, atk: 5, rg: 1, ap: 3, el: 'kinetic', stab: 72, skins: ['vanguard', 'vanguardB'] },
-  { key: 'sniper', r: 'S', n: '狙擊', hp: 14, atk: 5, rg: 2, ap: 2, el: 'emp', stab: 38, skins: ['sniper', 'sniperB'] },
-  { key: 'engineer', r: 'E', n: '工兵', hp: 16, atk: 4, rg: 2, ap: 3, el: 'armor', stab: 60, skins: ['engineer', 'engineerB'] },
+  { key: 'vanguard', r: 'V', n: '先鋒', hp: 18, atk: 5, rg: 1, ap: 3, el: 'kinetic', stab: 72, path: 'ASSAULT', skins: ['vanguard', 'vanguardB'] },
+  { key: 'sniper', r: 'S', n: '狙擊', hp: 14, atk: 5, rg: 2, ap: 2, el: 'emp', stab: 38, path: 'RECON', skins: ['sniper', 'sniperB'] },
+  { key: 'engineer', r: 'E', n: '工兵', hp: 16, atk: 4, rg: 2, ap: 3, el: 'armor', stab: 60, path: 'SUPPORT', skins: ['engineer', 'engineerB'] },
 ];
+
+export const PATH_NAMES = { ASSAULT: '強襲', RECON: '偵察', SUPPORT: '支援' };
 
 // ---------------------------------------------------------------- 詞條
 //
@@ -194,22 +198,142 @@ export const BOSSES = [
 export const PASS = {
   A2: 'A2', A3: 'A3', A4: 'A4', A5: 'A5',
   R2: 'R2', R3: 'R3', R4: 'R4', R5: 'R5',
+  S2: 'S2', S4: 'S4', S6: 'S6',
 };
 
+// ---------------------------------------------------------------- 主動技能
+//
+// 為什麼用「冷卻回合」而不是魔力值：
+//
+// 1. 代幣上已經沒有位置了。屬性徽章、AP 點、已出手標記、血條、識別標記
+//    全都擠在同一個 66-130px 的圓上，再加一條魔力條會把剪影糊掉。
+// 2. 魔力要配一整套「怎麼回、去哪補」的系統；冷卻不用，它自己就講完了。
+// 3. 一場戰鬥平均 4.2 回合。CD3 的技能一場最多放兩次 ——
+//    那本來就是「什麼時候放」的決策，不會變成每回合按同一顆。
+//    XCOM 的技能冷卻落在 2 到 4 回合，正是同一個理由。
+//
+// 花費規則（對齊《最後的咒語》「每個攻擊技能至少 1 AP」）：
+//   - 攻擊型技能收 1 AP：它取代你這回合的攻擊，就是一次更好的攻擊
+//   - 輔助型收 2 AP：它是「多出來的一次行動」，不佔攻擊次數
+//
+// 為什麼輔助型要貴一倍：行動經濟是這遊戲最強的槓桿（見 BALANCE.md 決策 2，
+// 「2 人變 3 人」讓通關率從 0% 跳到 52%）。輔助技能等於每隔幾回合多一次行動，
+// 第一版統一收 1 AP，meta=max 通關率直接從 52.5% 衝到 84.1%。
+// 收 2 AP 之後「放技能」要拿走位去換，那才是取捨。
+//
+// target：enemy = 敵人所在格、ally = 我方所在格（含自己）、empty = 空格
+export const SKILLS = {
+  charge: {
+    n: '突進斬',
+    d: '衝到目標旁並攻擊，傷害 ×1.3',
+    cd: 3,
+    ap: 1,
+    range: 3,
+    target: 'enemy',
+    attack: 1,
+    mult: 1.2,
+  },
+  shockwave: {
+    n: '震波',
+    d: '對所有相鄰敵人造成 75% 傷害',
+    cd: 4,
+    ap: 1,
+    range: 1,
+    target: 'self',
+    attack: 1,
+    mult: 0.6,
+  },
+  mark: {
+    n: '標定',
+    d: '標記目標 2 回合，全隊對它傷害 +25%',
+    cd: 3,
+    ap: 2,
+    range: 3,
+    target: 'enemy',
+    attack: 0,
+    turns: 2,
+    v: 0.25,
+  },
+  blink: {
+    n: '相位轉移',
+    d: '傳送到 3 格內的空格，不耗移動力',
+    cd: 3,
+    ap: 2,
+    range: 3,
+    target: 'empty',
+    attack: 0,
+  },
+  patch: {
+    n: '應急修補',
+    d: '治療一名隊友 25% Max HP',
+    cd: 4,
+    ap: 2,
+    range: 2,
+    target: 'ally',
+    attack: 0,
+    v: 0.25,
+  },
+  jam: {
+    n: '電磁干擾',
+    d: '造成 60% 傷害，並使目標下回合無法攻擊',
+    cd: 5,
+    ap: 1,
+    range: 2,
+    target: 'enemy',
+    attack: 1,
+    mult: 0.6,
+    turns: 1,
+  },
+};
+
+// 狀態效果。存成 { id: 剩餘回合 }，每個我方回合開始時遞減。
+export const STATUS = {
+  marked: { n: '標定', d: '受到的傷害 +30%', bad: 1 },
+  stunned: { n: '干擾', d: '無法攻擊', bad: 1 },
+};
+
+// 技能樹：三條路線各 5 階，被動與主動交錯。
+//
+// 路線直接綁原型（先鋒→強襲、狙擊→偵察、工兵→支援），不再靠抽卡開通。
+// 這樣「每個角色會有不同技能」才成立，也解掉「沒抽到路線卡整棵樹鎖住」——
+// 那種鎖法讓運氣差的一局連系統都摸不到。
+//
+// 五階一次全部看得見（《最後的咒語》的做法）：玩家可以先規劃 build，
+// 而不是每次升級才發現下一個節點是什麼。
+//
+// free: 1 = 出場就送。第一版把主動技能放在 Lv3、要花技能點才開，
+// 結果新玩家整場平均只解鎖 1.25 / 5 個節點 —— 招牌功能對他們是隱形的。
+// 現在每個人一上場就帶著自己路線的招牌技能，技能樹的角色變成「延伸升級」。
 export const TREE = {
   ASSAULT: [
-    { lv: 2, id: PASS.A2, n: '過載驅動', d: 'Max AP +1' },
-    { lv: 3, id: PASS.A3, n: '震盪刃', d: '近戰傷害 +1' },
+    { lv: 2, id: 'charge', skill: 'charge', free: 1 },
+    { lv: 3, id: PASS.A2, n: '過載驅動', d: 'Max AP +1' },
     { lv: 4, id: PASS.A4, n: '強化裝甲', d: 'Max HP +3' },
-    { lv: 5, id: PASS.A5, n: '破障協定', d: '攻擊無視掩體' },
+    { lv: 5, id: 'shockwave', skill: 'shockwave' },
+    { lv: 6, id: PASS.A5, n: '破障協定', d: '攻擊無視掩體' },
   ],
   RECON: [
-    { lv: 2, id: PASS.R2, n: '目標鎖定', d: 'Range +1' },
-    { lv: 3, id: PASS.R3, n: '機動模組', d: 'Max AP +1' },
+    { lv: 2, id: 'mark', skill: 'mark', free: 1 },
+    { lv: 3, id: PASS.R2, n: '目標鎖定', d: 'Range +1' },
     { lv: 4, id: PASS.R4, n: '匿蹤披覆', d: '站掩體時再減傷 1' },
-    { lv: 5, id: PASS.R5, n: '獵標系統', d: '遠程傷害 +1' },
+    { lv: 5, id: 'blink', skill: 'blink' },
+    { lv: 6, id: PASS.R5, n: '獵標系統', d: '遠程傷害 +1' },
+  ],
+  SUPPORT: [
+    { lv: 2, id: 'patch', skill: 'patch', free: 1 },
+    { lv: 3, id: PASS.S2, n: '維修協定', d: '每回合開始，相鄰隊友 +1 HP' },
+    { lv: 4, id: PASS.S4, n: '護盾投射', d: '相鄰隊友受到的傷害 −1' },
+    { lv: 5, id: 'jam', skill: 'jam' },
+    { lv: 6, id: PASS.S6, n: '超載充能', d: '自己所有技能冷卻 −1' },
   ],
 };
+
+// 節點的顯示名稱與說明：主動技能的文字寫在 SKILLS，這裡統一取出來
+export function treeNodeInfo(node) {
+  if (!node.skill) return { n: node.n, d: node.d, skill: null };
+  const s = SKILLS[node.skill];
+  return { n: s.n, d: `${s.d}（冷卻 ${s.cd} 回合・${s.ap} AP${s.attack ? '・算攻擊' : ''}）`, skill: node.skill };
+}
 
 // ---------------------------------------------------------------- 卡池
 
@@ -222,8 +346,11 @@ export const CARDS = [
   { id: 'ap', w: 25, r: RARITY.RARE, n: '反應爐擴充', d: `Max AP +1（上限 ${TUNE.AP_CAP}）並回復 1`, price: 85 },
   { id: 'sp', w: 25, r: RARITY.RARE, n: '戰術資料包', d: '技能點 +1', price: 80 },
   { id: 'ul', w: 22, r: RARITY.RARE, n: '免費節點解鎖', d: '直接解鎖下一個技能樹節點', price: 90 },
-  { id: 'pa', w: 6, r: RARITY.EPIC, n: '路線：強襲', d: '選定強襲路線並解鎖 Lv2 節點', price: 130 },
-  { id: 'pr', w: 6, r: RARITY.EPIC, n: '路線：偵察', d: '選定偵察路線並解鎖 Lv2 節點', price: 130 },
+  // 路線改成綁原型之後，原本的兩張「路線」卡沒有意義了。
+  // 換成兩張跟主動技能有關的稀有卡，讓技能系統也有卡片可以強化。
+  { id: 'stab', w: 22, r: RARITY.RARE, n: '陀螺穩定器', d: '穩定性 +12（傷害更集中）', price: 80 },
+  { id: 'cool', w: 8, r: RARITY.EPIC, n: '散熱超載', d: '所有技能冷卻 −1（最低 1）', price: 140 },
+  { id: 'sp2', w: 6, r: RARITY.EPIC, n: '深度簡報', d: '技能點 +2', price: 150 },
 ];
 
 export const CARD_BY_ID = Object.fromEntries(CARDS.map((c) => [c.id, c]));

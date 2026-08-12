@@ -14,6 +14,7 @@ import {
   damageOf, damageBreakdown, faceToward, dist, key, pickDraftCard, chooseEventOption, closeEvent,
   buyShopItem, leaveShop, chooseSupply, closeSupply, closeVictory,
   repairOptions, buyRepair, setFocus,
+  skillsOf, skillState, validSkillTiles, castSkill,
 } from '../src/engine.js';
 import { META_UPGRADES, TUNE, FLOORS } from '../src/data.js';
 
@@ -101,9 +102,73 @@ function bestPlayerMove(g, u, foes) {
 }
 
 // 一次呼叫做一個動作（移動或攻擊）。攻擊每回合限一次，所以打完這個單位就結束了。
+// 技能決策。bot 不必打得高明，但一定要「會用」——
+// 不用的話量到的是一個沒有技能系統的遊戲，那份平衡報告等於在描述別款遊戲。
+function botSkill(g, u) {
+  const foes = aliveOf(g, 'e');
+  const mates = aliveOf(g, 'p');
+  for (const id of skillsOf(u)) {
+    const st = skillState(g, u, id);
+    if (!st.ok) continue;
+    const tiles = validSkillTiles(g, u, id);
+    if (!tiles.length) continue;
+
+    if (id === 'patch') {
+      // 只在有人真的傷得重的時候補，不然浪費一次冷卻
+      const hurt = mates.filter((m) => m.hp <= m.mhp * 0.55)
+        .filter((m) => tiles.some((t) => t.x === m.x && t.y === m.y))
+        .sort((a, b) => a.hp / a.mhp - b.hp / b.mhp)[0];
+      if (hurt) { castSkill(g, u, id, hurt.x, hurt.y); return true; }
+      continue;
+    }
+    if (id === 'shockwave') {
+      // 至少要打到兩隻才划算，只打一隻不如normal攻擊
+      const hit = foes.filter((f) => dist(u.x, u.y, f.x, f.y) <= 1).length;
+      if (hit >= 2) { castSkill(g, u, id, u.x, u.y); return true; }
+      continue;
+    }
+    if (id === 'jam') {
+      // 優先干擾打得最痛的那一隻
+      const t = foes.filter((f) => tiles.some((p) => p.x === f.x && p.y === f.y))
+        .sort((a, b) => b.atk - a.atk)[0];
+      if (t) { castSkill(g, u, id, t.x, t.y); return true; }
+      continue;
+    }
+    if (id === 'mark') {
+      // 標記血最多的那隻：標記是為了幫全隊打掉硬目標
+      const t = foes.filter((f) => tiles.some((p) => p.x === f.x && p.y === f.y))
+        .filter((f) => !(f.st?.marked > 0))
+        .sort((a, b) => b.hp - a.hp)[0];
+      if (t) { castSkill(g, u, id, t.x, t.y); return true; }
+      continue;
+    }
+    if (id === 'charge') {
+      // 打不到人的時候才衝：衝了等於一次移動加一次強化攻擊
+      const reachable = foes.some((f) => dist(u.x, u.y, f.x, f.y) <= u.rg);
+      if (reachable) continue;
+      const t = foes.filter((f) => tiles.some((p) => p.x === f.x && p.y === f.y))
+        .sort((a, b) => a.hp - b.hp)[0];
+      if (t) { castSkill(g, u, id, t.x, t.y); return true; }
+      continue;
+    }
+    // blink：只在完全搆不到、而且傳送過去就能打的時候用
+    if (id === 'blink') {
+      if (foes.some((f) => dist(u.x, u.y, f.x, f.y) <= u.rg)) continue;
+      const spot = tiles
+        .filter((p) => foes.some((f) => dist(p.x, p.y, f.x, f.y) <= u.rg))
+        .sort((a, b) => a.x - b.x)[0];
+      if (spot) { castSkill(g, u, id, spot.x, spot.y); return true; }
+    }
+  }
+  return false;
+}
+
 function botActUnit(g, u) {
   const foes = aliveOf(g, 'e');
-  if (!foes.length || u.ap <= 0 || u.attacked) return false;
+  if (!foes.length || u.ap <= 0) return false;
+
+  if (botSkill(g, u)) return true;
+  if (u.attacked) return false;
 
   const inRange = foes.filter((f) => dist(u.x, u.y, f.x, f.y) <= u.rg);
   if (inRange.length) {
@@ -128,8 +193,9 @@ function botActUnit(g, u) {
 function botDraft(g) {
   const d = g.pending.draft;
   if (!d) return;
-  // 優先順序：路線 > 免費解鎖 > 技能點 > AP > 射程 > 攻擊 > 血量
-  const priority = ['pa', 'pr', 'ul', 'sp', 'ap', 'rg', 'atk', 'mhp'];
+  // 優先順序：免費解鎖 > 技能點 > 冷卻縮減 > AP > 射程 > 攻擊 > 穩定 > 血量。
+  // 技能點排前面是因為技能樹現在有主動技能，開得越快這一場的手段越多。
+  const priority = ['ul', 'sp2', 'sp', 'cool', 'ap', 'rg', 'atk', 'stab', 'mhp'];
   const sorted = d.cards.slice().sort((a, b) => priority.indexOf(a.id) - priority.indexOf(b.id));
   pickDraftCard(g, sorted[0].id);
 }
@@ -275,6 +341,8 @@ function summarize(g) {
     cores: r?.cores ?? 0,
     credits: g.credits,
     levels: g.squad.map((u) => u.lv),
+    unlocks: g.squad.map((u) => Object.keys(u.ul).length),
+    skillUses: g.stats.skillUses ?? 0,
   };
 }
 
@@ -333,6 +401,8 @@ console.log(`  平均戰鬥場次    ${avg(results.map((r) => r.battles)).toFixe
 console.log(`  每場平均回合    ${avg(turnsPerBattle).toFixed(2)}  (上限 ${TUNE.TURN_LIMIT})`);
 console.log(`  平均碎片收入    ${avg(results.map((r) => r.cores)).toFixed(1)}`);
 console.log(`  結束時等級      ${avg(results.flatMap((r) => r.levels)).toFixed(2)}`);
+console.log(`  技能樹解鎖數    ${avg(results.flatMap((r) => r.unlocks)).toFixed(2)} / 5`);
+console.log(`  技能發動次數    ${avg(results.map((r) => r.skillUses)).toFixed(1)} /場`);
 if (stuck) console.log(`  ⚠ 卡住的場次     ${stuck}  （流程有 bug，必須先修）`);
 console.log('───────────────────────────────────────────────────────');
 console.log('  死亡 / 結束層數分佈');

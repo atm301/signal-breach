@@ -7,7 +7,7 @@ import {
   selectUnit, spendSkillPoint, pickDraftCard, chooseEventOption, closeEvent,
   buyShopItem, leaveShop, chooseSupply, closeSupply, setFocus, finishRun,
   serializeState, log, queueDraft, closeVictory,
-  openRecruit, toggleRecruit, confirmRecruit, buyRepair, setDraftTarget,
+  openRecruit, toggleRecruit, confirmRecruit, buyRepair, setDraftTarget, armSkill, cancelSkill,
 } from './engine.js';
 import { loadMeta, saveMeta, buyUpgrade, recordRun, resetMeta } from './meta.js';
 import { loadAssets, assetCount } from './assets.js';
@@ -194,6 +194,10 @@ const actions = {
     if (!res.ok) log(g, res.reason, true);
   },
   draft(cardId) { pickDraftCard(g, cardId); },
+  skill(unitId, id) {
+    const res = armSkill(g, unitId, id);
+    if (!res.ok && res.reason) log(g, res.reason, true);
+  },
   draftTarget(unitId) {
     const res = setDraftTarget(g, unitId);
     if (!res.ok) log(g, res.reason, true);
@@ -283,6 +287,8 @@ document.addEventListener('keydown', (ev) => {
   if (!g) return;
   if (ev.target instanceof HTMLInputElement) return;
   const k = ev.key.toLowerCase();
+  // Esc 取消技能指定。玩家按了技能才會進這個狀態，一定要有一鍵退出。
+  if (k === 'escape') { cancelSkill(g); return; }
   if (k === 'e' || k === ' ') { ev.preventDefault(); actions.endturn(); }
   if (k === 's') actions.sfx();
   if (k === 'b') actions.music();

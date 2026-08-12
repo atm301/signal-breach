@@ -829,6 +829,179 @@ check('draftLabelNotDoubled',
   Object.values(draftTargeting.labels).every((t) => t && !/改裝改裝/.test(t)),
   `標題重複了：${JSON.stringify(draftTargeting.labels)}`);
 
+// ---------------------------------------------------------------- 主動技能
+//
+// 技能最容易出的錯跟詞條一樣：寫了但沒接上。
+// 冷卻沒扣、AP 沒收、狀態沒生效、目標判定跟畫面高亮兩套 ——
+// 每一種都不會讓遊戲壞掉，只會安靜地變成一個假的系統。
+const { SKILLS, TREE, PATH_NAMES } = await import('../src/data.js');
+const {
+  skillsOf, skillState, validSkillTiles, castSkill, armSkill, hasStatus, skillCd,
+} = engine;
+
+// 1) 路線綁原型，而且每個人出場就帶著自己的招牌技能
+const skillPools = Array.from({ length: 20 }, (_, i) => createGame({ seed: `skill-${i}` }).recruits).flat();
+check('pathBoundToArchetype', skillPools.every((u) => {
+  const t = PLAYER_TEMPLATES.find((p) => p.key === u.key);
+  return u.path === t.path;
+}), '路線必須由原型決定，不能是 null');
+check('everyoneStartsWithASkill', skillPools.every((u) => skillsOf(u).length >= 1),
+  '出場就要有招牌技能，否則新玩家整場碰不到技能系統');
+check('archetypesHaveDifferentSkills',
+  new Set(PLAYER_TEMPLATES.map((t) => TREE[t.path][0].skill)).size === PLAYER_TEMPLATES.length,
+  '三個原型的招牌技能不能重複，不然「每個角色不同技能」是假的');
+check('everySkillIsReachable', (() => {
+  const inTree = new Set(Object.values(TREE).flat().filter((n) => n.skill).map((n) => n.skill));
+  return Object.keys(SKILLS).every((id) => inTree.has(id));
+})(), `有技能沒有掛在任何技能樹上：${Object.keys(SKILLS).filter((id) => !Object.values(TREE).flat().some((n) => n.skill === id)).join()}`);
+
+// 2) 花費與冷卻要真的扣
+const skillRuntime = await page.evaluate(async () => {
+  const eng = await import('./src/engine.js');
+  const { SKILLS: S } = await import('./src/data.js');
+  // 乾淨的戰鬥，不沿用前面被改壞的狀態
+  window.game_actions.toHub();
+  window.game_actions.startRun();
+  window.game_actions.recruitGo();
+  for (let i = 0; i < 6; i++) {
+    const gm = window.__game();
+    if (gm.screen === 'battle') break;
+    const cur = gm.map.nodes[gm.currentNodeId];
+    const next = (cur?.next || []).map((id) => gm.map.nodes[id]).filter(Boolean);
+    const pick = next.find((n) => n.type === 'battle') || next[0];
+    if (!pick) break;
+    window.game_actions.goNode(pick.id);
+    if (window.__game().pending.supply) window.game_actions.supplyClose();
+    if (window.__game().pending.event) window.game_actions.eventClose();
+  }
+  const gm = window.__game();
+  if (gm.screen !== 'battle') return { skipped: true };
+
+  const out = {};
+  const vanguard = gm.battle.units.find((u) => u.tm === 'p' && u.path === 'ASSAULT');
+  const engineer = gm.battle.units.find((u) => u.tm === 'p' && u.path === 'SUPPORT');
+  const recon = gm.battle.units.find((u) => u.tm === 'p' && u.path === 'RECON');
+  const foe = gm.battle.units.find((u) => u.tm === 'e' && u.alive);
+
+  // 標定：狀態要上、傷害要變高、預測卡要看得到
+  if (recon && foe) {
+    foe.x = recon.x; foe.y = Math.max(0, recon.y - 1);
+    // 變數控制：基礎傷害太小的話 x1.25 會四捨五入回同一個整數，
+    // 斷言就變成偶發紅字，而且紅字講的原因是錯的（「標定沒生效」其實是「數字太小」）。
+    recon.atk = 10; recon.el = 'kinetic'; recon.tr = []; recon.trv = {};
+    foe.el = 'kinetic'; foe.tr = []; foe.trv = {}; foe.st = {};
+    foe.hp = 99; foe.mhp = 99;
+    recon.ap = recon.map; recon.attacked = 0; recon.cd = {};
+    const before = eng.damageBreakdown(gm, recon, foe).mid;
+    const apBefore = recon.ap;
+    const r = eng.castSkill(gm, recon, 'mark', foe.x, foe.y);
+    const after = eng.damageBreakdown(gm, recon, foe).mid;
+    out.mark = {
+      ok: r.ok,
+      status: eng.hasStatus(foe, 'marked'),
+      apSpent: apBefore - recon.ap,
+      before, after, dmgUp: after > before,
+      inForecast: eng.damageBreakdown(gm, recon, foe).traitMods.some((m) => m.n === '標定'),
+      cdSet: (recon.cd?.mark ?? 0) > 0,
+      attackNotUsed: recon.attacked === 0,
+    };
+  }
+  // 應急修補：治療 + 不佔攻擊
+  if (engineer) {
+    const mate = gm.battle.units.find((u) => u.tm === 'p' && u !== engineer && u.alive);
+    if (mate) {
+      mate.x = engineer.x; mate.y = engineer.y;
+      mate.hp = 1;
+      engineer.ap = engineer.map; engineer.attacked = 0; engineer.cd = {};
+      const r = eng.castSkill(gm, engineer, 'patch', mate.x, mate.y);
+      out.patch = { ok: r.ok, healed: mate.hp > 1, attackNotUsed: engineer.attacked === 0 };
+    }
+  }
+  // 突進斬：會位移、會攻擊、會佔用攻擊次數
+  if (vanguard && foe && foe.alive) {
+    vanguard.x = 0; vanguard.y = 4;
+    foe.x = 0; foe.y = 2; foe.hp = 99; foe.mhp = 99;
+    vanguard.ap = vanguard.map; vanguard.attacked = 0; vanguard.cd = {};
+    const posBefore = `${vanguard.x},${vanguard.y}`;
+    const hpBefore = foe.hp;
+    const r = eng.castSkill(gm, vanguard, 'charge', foe.x, foe.y);
+    out.charge = {
+      ok: r.ok,
+      moved: `${vanguard.x},${vanguard.y}` !== posBefore,
+      dealt: hpBefore - foe.hp,
+      attackUsed: vanguard.attacked === 1,
+      // 冷卻中再放一次必須被擋
+      blockedOnCd: !eng.skillState(gm, vanguard, 'charge').ok,
+    };
+  }
+  // 就緒狀態：按技能 → armedSkill 有值 → 再按一次取消
+  if (recon) {
+    recon.ap = recon.map; recon.cd = {}; recon.attacked = 0;
+    const a = eng.armSkill(gm, recon.id, 'mark');
+    const armed = !!gm.battle.armedSkill;
+    eng.armSkill(gm, recon.id, 'mark');
+    out.arm = { ok: a.ok, armed, cancelled: !gm.battle.armedSkill };
+  }
+  // 高亮的格子與實際可施放的格子必須是同一份
+  if (recon) {
+    const tiles = eng.validSkillTiles(gm, recon, 'mark');
+    const bad = tiles.filter((t) => {
+      const at = gm.battle.units.find((u) => u.alive && u.x === t.x && u.y === t.y);
+      return !at || at.tm === 'p';
+    });
+    out.tiles = { n: tiles.length, bad: bad.length };
+  }
+  return out;
+});
+
+check('skillProbeRan', !skillRuntime.skipped, JSON.stringify(skillRuntime));
+check('skillMarkAppliesStatus', skillRuntime.mark?.status === true, JSON.stringify(skillRuntime.mark));
+check('skillMarkRaisesDamage', skillRuntime.mark?.dmgUp === true, JSON.stringify(skillRuntime.mark));
+check('skillMarkShowsInForecast', skillRuntime.mark?.inForecast === true,
+  `預測卡看不到「因為被標定所以多打」，標定就白做了：${JSON.stringify(skillRuntime.mark)}`);
+check('skillCostsAp', skillRuntime.mark?.apSpent === SKILLS.mark.ap,
+  `輔助技能該扣 ${SKILLS.mark.ap} AP：${JSON.stringify(skillRuntime.mark)}`);
+check('skillSetsCooldown', skillRuntime.mark?.cdSet === true, JSON.stringify(skillRuntime.mark));
+check('utilitySkillKeepsAttack', skillRuntime.mark?.attackNotUsed === true
+  && skillRuntime.patch?.attackNotUsed === true,
+  '輔助型技能不該用掉本回合的攻擊');
+check('skillPatchHeals', skillRuntime.patch?.healed === true, JSON.stringify(skillRuntime.patch));
+check('skillChargeMovesAndHits',
+  skillRuntime.charge?.moved === true && skillRuntime.charge?.dealt > 0,
+  JSON.stringify(skillRuntime.charge));
+check('attackSkillConsumesAttack', skillRuntime.charge?.attackUsed === true,
+  '攻擊型技能必須用掉本回合的攻擊，否則等於免費多打一次');
+check('cooldownBlocksReuse', skillRuntime.charge?.blockedOnCd === true,
+  '冷卻沒擋住的話技能可以連按');
+check('skillArmAndCancel',
+  skillRuntime.arm?.armed === true && skillRuntime.arm?.cancelled === true,
+  `按技能要進入指定目標狀態、再按一次要取消：${JSON.stringify(skillRuntime.arm)}`);
+check('skillTilesMatchTargetRule',
+  skillRuntime.tiles?.n > 0 && skillRuntime.tiles?.bad === 0,
+  `高亮的格子裡有不合法的目標：${JSON.stringify(skillRuntime.tiles)}`);
+
+// 三條路線的名字都要顯示得出來。
+// 小隊面板原本寫死成「ASSAULT ? 強襲 : 偵察」的二選一，加了支援路線之後
+// 工兵會被標成「偵察」—— 不會壞掉，只是每個工兵身上都掛著錯的字。
+const pathLabels = await page.evaluate(async () => {
+  const { PATH_NAMES: P } = await import('./src/data.js');
+  const gm = window.__game();
+  const out = {};
+  for (const key of Object.keys(P)) {
+    const u = gm.squad.find((v) => v.path === key) || gm.recruits.find((v) => v.path === key);
+    if (!u) { out[key] = 'no-unit'; continue; }
+    gm.focusId = u.id;
+    window.__debug.invalidateUi?.();
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const panel = document.getElementById('panel').innerText;
+    out[key] = panel.includes(P[key]);
+  }
+  return out;
+});
+check('everyPathNameRendered', Object.values(pathLabels).every((v) => v === true),
+  `有路線名稱顯示不出來（八成是寫死的二選一三元式）：${JSON.stringify(pathLabels)}`);
+
 check('noConsoleErrors', errors.length === 0, errors.slice(0, 3).join(' | '));
 
 await browser.close();

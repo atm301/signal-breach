@@ -7,7 +7,9 @@
 import { makeRng, hashSeed } from './rng.js';
 
 const KEY = 'sft_run_v1';
-const VERSION = 1;
+// v2：加入主動技能（path 綁原型、u.cd 冷卻、u.st 狀態、u.cool 冷卻縮減）。
+// 舊存檔的 path 可能是 null 或已移除的路線卡結果，直接作廢比較安全。
+const VERSION = 2;
 
 function storage() {
   try {

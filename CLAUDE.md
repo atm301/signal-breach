@@ -26,7 +26,7 @@ npm run sim:long       # 跑 2000 場，數字比較穩
 node tools/simulate.mjs --meta=max --drop=dualperk,augment   # 關掉指定永久升級，量單項貢獻
 npm test               # Playwright 整合測試（35 項斷言 + console error 檢查）
 npm run check          # sim + test + audio + tactics 一起跑
-npm run check:tactics  # 戰術層 96 項：相剋／側背／區間／詞條／永久升級／編隊／修整／上色／敵方回合
+npm run check:tactics  # 戰術層 114 項：相剋／側背／區間／詞條／永久升級／編隊／修整／上色／敵方回合
 npm run shots          # 各畫面截圖到 test-output/shots/，要人眼看
 npm run assets         # 重切素材表 + 重做 OG 圖
 npm run assets:review  # 素材接觸表（深色底），檢查去背與損傷遞進
@@ -98,6 +98,14 @@ serve.mjs           零依賴靜態伺服器（開發 + 測試共用）
   只有一個地方負責套用倍率，才不會有的效果吃到、有的漏掉。
 - **外觀走獨立亂數流 `lookRng`**。skin / look 不准抽在遊戲 `rng` 上 ——
   加一套素材就會把整條隨機序列往後推，平衡數字跟著失真但完全看不出原因。
+- **主動技能用冷卻，不用魔力值。** 代幣上已經沒位置放魔力條，而且魔力要配
+  一整套「怎麼回、去哪補」；冷卻自己就講完了。理由完整寫在 BALANCE.md。
+  花費按性質分：攻擊型 1 AP 且佔用本回合攻擊，輔助型 2 AP 但不佔攻擊 ——
+  輔助型是「多出來的一次行動」，行動經濟是這遊戲最強的槓桿。
+- **路線綁原型**（先鋒→強襲、狙擊→偵察、工兵→支援），Lv2 的招牌技能出場就送。
+  不送的話新玩家整場只解鎖 1.25/5 個節點，招牌功能對他們是隱形的。
+- **技能的目標判定只能有一份**（`validSkillTiles`）。畫面高亮與實際施放共用它，
+  兩邊分開寫一定會出現「畫得亮但點下去說不行」。
 - 畫面狀態機：`title` → `hub` → `map` → `battle` → `victory` → `map` ...，另有 `credits` / `event` / `shop` / `supply` / `result`。
 - 肅清全部敵人後會停在**通關結算畫面**（`screen === 'victory'`），按「繼續推進」才回地圖。
   加新畫面時記得同步教會 `tools/simulate.mjs` 的機器人，否則模擬器會卡住。
@@ -192,6 +200,8 @@ assets/manifest.json       載入器只會請求這份清單上的檔案
 | 調難度、改數值 | `src/data.js` 的 `TUNE`，然後跑 `npm run sim` |
 | 加新敵人 | `src/data.js` 的 `ENEMY_ARCHETYPES`（記得設 `tier` 和 `w`） |
 | 加新卡片 | `src/data.js` 的 `CARDS` + `src/engine.js` 的 `applyCard` |
+| 加新主動技能 | `src/data.js` 的 `SKILLS`（cd / ap / target / attack）+ 掛進 `TREE` 某一階 + `engine.js` 的 `castSkill` 加一個 case。⚠️ 目標判定只能寫在 `validSkillTiles`，畫面高亮與實際施放共用它 |
+| 加新狀態效果 | `src/data.js` 的 `STATUS` + `damageBreakdown` 或對應 hook 讀 `hasStatus`；記得回報進 `traitMods` |
 | 加新的抽卡來源 | 對象固定（誰升級就是誰）用 `queueDraft`；對象該由玩家挑用 `queueChoiceDraft`。⚠️ 不要用 `focusUnit` 當獎勵對象，它預設永遠是 `squad[0]` |
 | 加新事件 | `src/data.js` 的 `EVENTS`。效果型別看 `engine.js` 的 `applyEffects` |
 | 加新永久升級 | `src/data.js` 的 `META_UPGRADES` + `engine.js` 的 `rollOperative` / `createGame` |

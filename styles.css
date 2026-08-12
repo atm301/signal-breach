@@ -201,6 +201,20 @@ button.big { padding: 15px; font-size: 16px; font-weight: 800; letter-spacing: 2
 .trait.bad { color: #ff9d9d; }
 .tag.clean { color: #8fffad; border-color: #4f9c6a; }
 
+/* 主動技能列。冷卻剩幾回合要看得到，只是變灰不夠 */
+.skills {
+  margin-top: 8px; border: 1px solid #4a4326; border-radius: 8px;
+  background: rgba(30, 26, 12, .45); overflow: hidden;
+}
+.skill { padding: 7px 9px; border-top: 1px solid rgba(255, 217, 128, .12); }
+.skill:first-of-type { border-top: 0; }
+.skill.down { opacity: .55; }
+.skill.armed { background: rgba(255, 217, 128, .12); }
+.skill-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.skill-head b { color: #ffd980; font-size: 13px; }
+.skill .item-body { font-size: 12px; color: var(--mut); margin: 3px 0 6px; }
+.skill button { width: 100%; }
+
 /* 改裝目標切換：精英獎勵與補給讓玩家自己挑要餵誰 */
 .draft-target { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 4px; }
 .draft-target .mut { font-size: 11px; letter-spacing: .06em; }
