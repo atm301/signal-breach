@@ -17,6 +17,8 @@ import {
   skillsOf, skillState, validSkillTiles, castSkill,
 } from '../src/engine.js';
 import { META_UPGRADES, TUNE, FLOORS } from '../src/data.js';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------- 參數
 
@@ -193,9 +195,22 @@ function botActUnit(g, u) {
 function botDraft(g) {
   const d = g.pending.draft;
   if (!d) return;
-  // 優先順序：免費解鎖 > 技能點 > 冷卻縮減 > AP > 射程 > 攻擊 > 穩定 > 血量。
-  // 技能點排前面是因為技能樹現在有主動技能，開得越快這一場的手段越多。
-  const priority = ['ul', 'sp2', 'sp', 'cool', 'ap', 'rg', 'atk', 'stab', 'mhp'];
+  // ⚠️ ATK 必須排第一。
+  //
+  // 這裡原本把 ul / sp2 / sp / cool / ap / rg 全部排在 atk 前面，理由是
+  // 「技能樹開得越快手段越多」。實測那個直覺錯得離譜：
+  // 光是把 atk 提到第一順位，永久升級點滿的通關率就從 48.2% 跳到 97.2%。
+  //
+  // 原因是攻擊每回合只有一次，所以 ATK 直接就是這一回合的輸出上限；
+  // 而技能點、射程、冷卻都只是「更多選擇」，換不到等量的傷害。
+  //
+  // 這個 bug 還連帶製造了一個假結論：因為 bot 老是挑爛卡，
+  // 「情報網（4 選 1）」看起來會讓通關率掉 16 個百分點 —— 選項變多只是讓它更常挑錯。
+  // 修好之後那個懲罰就消失了（97.2% vs 95.3%，在雜訊內）。
+  //
+  // 教訓：bot 可以不高明，但不能在「唯一最重要的決策」上系統性地做錯，
+  // 否則整份平衡報告都是在描述另一款遊戲。
+  const priority = ['atk', 'ul', 'ap', 'sp2', 'sp', 'cool', 'rg', 'stab', 'mhp'];
   const sorted = d.cards.slice().sort((a, b) => priority.indexOf(a.id) - priority.indexOf(b.id));
   pickDraftCard(g, sorted[0].id);
 }
@@ -372,6 +387,17 @@ function bar(n, total, width = 28) {
 // ---------------------------------------------------------------- 主程式
 
 const meta = metaFor(META_MODE);
+// 給 tools/advice.mjs 重用。
+// 刻意共用同一份 bot：兩份實作一定會漂移，那樣算出來的攻略是在講另一個遊戲。
+export { playRun, metaFor };
+
+// 被 import 的時候不要跑 300 場統計
+const RUN_AS_MAIN = process.argv[1]
+  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (!RUN_AS_MAIN) {
+  // 匯出用途，主程式整段跳過
+} else {
+
 const results = [];
 const t0 = Date.now();
 
@@ -437,3 +463,5 @@ if (problems.length) {
   console.log('  ✓ 沒有偵測到結構性問題');
   console.log('═══════════════════════════════════════════════════════');
 }
+
+} // RUN_AS_MAIN
