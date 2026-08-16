@@ -416,6 +416,93 @@ export const depthOf = (lv) => DEPTHS[Math.max(0, Math.min(MAX_DEPTH, lv | 0))];
 // 這比做新敵人便宜太多，而且逼玩家每場重新想。
 //
 // 三個約束：開打前就看得到、不能有「純粹更難」的、不能讓玩家無法應對。
+// ---------------------------------------------------------------- 戰術準則
+//
+// 為什麼需要這一層：在這之前，整局出擊沒有任何「承諾點」。
+// 技能路線綁死在原型上、詞條是徵召時隨機的、卡片是隨機發的 ——
+// 所以每一局的差別來自運氣，不是決策。玩家講不出「這局我在幹嘛」。
+//
+// 準則是那個承諾：選了就回不去，而且它會複利（偏向自己的卡池 +
+// 只有自己拿得到的專屬卡），也真的關掉別的門（每個都有代價）。
+//
+// 四條準則各自拉扯「站哪裡、打誰」這兩個戰棋唯一重要的問題。
+//
+// ⚠️ 加減值一律走 damageBreakdown 的 mul2()，會進 traitMods，
+// 也就是會出現在出手前的傷害預測卡上。不進預測卡的修正等於不存在。
+export const DOCTRINES = [
+  {
+    id: 'blitz',
+    n: '閃擊',
+    tag: '打快要死的',
+    d: '擊破後全隊 +1 AP。代價：全隊 Max HP −1。',
+    capstone: '處決線提高到 50%，且擊破回復 2 AP。',
+    hp: -1,
+    killAp: 1,
+    killApCap: 2,
+    execHp: 0.4,
+    execHpCap: 0.5,
+    bias: { chain: 3, momentum: 3, atk: 2, ap: 2 },
+    cards: ['frenzy', 'execute'],
+  },
+  {
+    id: 'phalanx',
+    n: '密集陣',
+    tag: '三個人黏在一起',
+    d: '身旁有隊友時攻擊 +15%、受傷 −1。代價：落單時攻擊 −20%。',
+    capstone: '三人互相相鄰時，全隊再減傷 2。',
+    adjAtk: 0.15,
+    adjDef: 1,
+    aloneAtk: -0.2,
+    bias: { guard: 3, mhp: 2, stab: 2 },
+    cards: ['bulwark', 'relay'],
+  },
+  {
+    id: 'overwatch',
+    n: '制高',
+    tag: '不讓人靠近',
+    d: '全隊 Range +1。距離 2 格以上攻擊 +15%。代價：被貼身（距離 1）攻擊 −25%。',
+    capstone: '距離 3 格以上時，傷害不再往下浮動。',
+    farAtk: 0.15,
+    rgUp: 1,
+    nearAtk: -0.25,
+    farLock: 3,
+    bias: { rg: 3, ambush: 3, stab: 2 },
+    cards: ['perch', 'suppress'],
+  },
+  {
+    id: 'resonance',
+    n: '解析',
+    tag: '照相剋挑對手',
+    d: '屬性相剋加成 ×1.35。代價：被剋時傷害再 −20%。',
+    capstone: '相剋擊破時，對相鄰敵人濺射 3 點傷害。',
+    elemUp: 1.35,
+    elemDown: -0.2,
+    splash: 3,
+    bias: { adapt: 4, sp: 2, ul: 2 },
+    cards: ['attune', 'cascade'],
+  },
+];
+
+export const DOCTRINE_BY_ID = Object.fromEntries(DOCTRINES.map((d) => [d.id, d]));
+
+// 準則專屬卡：只有選了對應準則的人抽得到。
+// 這是「複利」真正發生的地方 —— 光調權重，玩家感覺到的只是這局手氣好；
+// 看到一張別條路永遠拿不到的卡，才知道自己走在一條路上。
+export const DOCTRINE_CARDS = [
+  { id: 'frenzy', doc: 'blitz', w: 26, r: RARITY.RARE, n: '狂熱協定', d: '本場每擊破一台，攻擊 +8%（可疊）', price: 110, mod: 1 },
+  { id: 'execute', doc: 'blitz', w: 22, r: RARITY.EPIC, n: '處決程序', d: '對殘血目標傷害 +40%', price: 150, mod: 1 },
+  { id: 'bulwark', doc: 'phalanx', w: 26, r: RARITY.RARE, n: '壁壘裝甲', d: '每有一名相鄰隊友，受傷再 −1', price: 110, mod: 1 },
+  { id: 'relay', doc: 'phalanx', w: 22, r: RARITY.EPIC, n: '接力指令', d: '攻擊「相鄰隊友剛打過的目標」時 +25%', price: 150, mod: 1 },
+  { id: 'perch', doc: 'overwatch', w: 26, r: RARITY.RARE, n: '狙擊位', d: '站在掩體上時 Range +1', price: 110, mod: 1 },
+  { id: 'suppress', doc: 'overwatch', w: 22, r: RARITY.EPIC, n: '壓制射擊', d: '距離 3 格以上的攻擊必定打出區間上緣', price: 150, mod: 1 },
+  { id: 'attune', doc: 'resonance', w: 26, r: RARITY.RARE, n: '頻譜校準', d: '每場戰鬥開始時，屬性改成剋制最近的敵人', price: 110, mod: 1 },
+  { id: 'cascade', doc: 'resonance', w: 22, r: RARITY.EPIC, n: '連鎖共振', d: '相剋命中時，對目標相鄰的敵人濺射 2 點', price: 150, mod: 1 },
+];
+
+// 第二段能力在第幾層解鎖。給定值而不是靠抽卡累積 ——
+// 靠抽卡的話「這局準則有沒有成形」變成運氣，那又繞回原點了。
+export const CAPSTONE_FLOOR = 6;
+
 export const CONDITIONS = [
   { id: 'clear', n: '無異常', d: '沒有特殊狀況。', w: 45, plain: 1 },
   {

@@ -6,6 +6,7 @@ import {
   GRID, FLOORS, TUNE, ROLES, PLAYER_TEMPLATES, ENEMY_ARCHETYPES, BOSSES,
   TREE, PASS, CARDS, CARD_BY_ID, COVER_PATTERNS, EVENTS, SHOP_SERVICES, SKILLS, STATUS,
   RARITY, coresEarned, elementMultiplier, ELEMENTS, ELEMENT_KEYS, CONDITIONS, CONDITION_BY_ID, depthOf,
+  DOCTRINES, DOCTRINE_BY_ID, DOCTRINE_CARDS, CAPSTONE_FLOOR,
   TRAITS, GOOD_TRAITS, BAD_TRAITS, CALLSIGNS, traitV, hasTrait,
 } from './data.js';
 import { makeRng, hashSeed, readableSeed } from './rng.js';
@@ -171,6 +172,7 @@ export function createGame({ seed, meta = { upgrades: {} }, depth = 0 } = {}) {
     seed: String(seedInput),
     // 威脅等級。通關解鎖，玩家自己選要不要挑戰。修正累積疊加。
     depth: Math.max(0, depth | 0),
+    doctrine: null, // 這一局的戰術準則。選完不能改。
     seedLabel: readableSeed(labelRng),
     rng,
     meta,
@@ -192,7 +194,7 @@ export function createGame({ seed, meta = { upgrades: {} }, depth = 0 } = {}) {
     battle: null,
     pending: {
       draft: null, draftQueue: [], event: null, shop: null, supply: null,
-      victory: null, recruit: null, repair: null,
+      victory: null, recruit: null, repair: null, doctrine: null,
     },
     result: null,
     focusId: null,
@@ -205,6 +207,10 @@ export function createGame({ seed, meta = { upgrades: {} }, depth = 0 } = {}) {
   g.squad = g.recruits.slice(0, TUNE.SQUAD_SIZE);
   g.focusId = g.squad[0]?.id ?? null;
   g.currentNodeId = g.map.startId;
+  // 準則掛在 createGame 而不是 confirmRecruit：?seed= 與每日挑戰不經過
+  // 編隊畫面，掛在那裡的話那兩條路會整局沒有準則，
+  // 而「沒有準則」是一個不該存在的狀態（所有 hook 都會安靜跳過）。
+  g.pending.doctrine = { options: DOCTRINES.map((d) => d.id) };
   g.map.nodes[g.map.startId].visited = true;
   log(g, `登陸完成。種子 ${g.seedLabel}`, true);
 
@@ -268,6 +274,31 @@ export function confirmRecruit(g) {
   return { ok: true };
 }
 
+// 選定這一局的準則。整局只能選一次，之後不能改 ——
+// 可以改的話它就不是承諾，只是一個隨時能切的加成面板。
+export function chooseDoctrine(g, id) {
+  if (!g.pending.doctrine) return { ok: false, reason: '目前不在選準則階段' };
+  const doc = DOCTRINE_BY_ID[id];
+  if (!doc) return { ok: false, reason: '沒有這個準則' };
+  g.doctrine = id;
+  g.pending.doctrine = null;
+  // 代價當場結算，讓玩家馬上看到自己付了什麼
+  if (doc.hp) {
+    for (const u of g.squad) {
+      u.mhp = Math.max(4, u.mhp + doc.hp);
+      u.hp = Math.min(u.hp, u.mhp);
+    }
+  }
+  // 制高給全隊 +1 射程。這一條是量出來才加的：光加傷害，制高怎麼調
+  // 都卡在同一個數字，因為射程 1 的先鋒根本不在這個準則裡。
+  // 加傷害治不了「有人被排除在外」，把他拉進來才治得了。
+  if (doc.rgUp) {
+    for (const u of g.squad) u.rg = Math.min(TUNE.RG_CAP, u.rg + doc.rgUp);
+  }
+  log(g, `戰術準則確立：${doc.n} —— ${doc.d}`, true);
+  return { ok: true, doctrine: doc };
+}
+
 // 開啟選人畫面（由 main.js 在開新 run 之後呼叫；模擬器不走這條）
 export function openRecruit(g) {
   g.pending.recruit = { picked: g.squad.map((u) => u.id) };
@@ -296,6 +327,9 @@ export function setFocus(g, id) {
 
 export function enterNode(g, nodeId) {
   if (g.screen !== 'map') return false;
+  // 擋在引擎而不是點擊處理器：畫布、鍵盤、之後任何新的入口都會經過這裡。
+  // 只擋 click 的話，同一個洞會從別的地方再開一次。
+  if (g.pending.doctrine || g.pending.recruit) return false;
   const allowed = availableNodes(g).some((n) => n.id === nodeId);
   if (!allowed) return false;
 
@@ -420,6 +454,7 @@ export function startBattle(g, node) {
     // 這一場第一回合能不能放，玩家完全無從預期。
     u.cd = {};
     u.st = {};
+    u.frenzy = 0; // 狂熱只在同一場內累積，跨場帶走會滾成無限
   });
 
   const D = depthOf(g.depth);
@@ -524,6 +559,39 @@ function adjacentCount(g, u, team) {
 // 卡片給的「改寫規則」標記。跟詞條分開：詞條是天生的，卡片是這一局長出來的。
 export const hasMod = (u, id) => !!u?.mods?.[id];
 
+// 這一局選了什麼準則。沒選時回 null，所有 hook 都會安靜跳過。
+export const doctrineOf = (g) => (g?.doctrine ? DOCTRINE_BY_ID[g.doctrine] ?? null : null);
+
+// 第二段能力在 CAPSTONE_FLOOR 之後生效。用層數而不是「收集到幾張專屬卡」：
+// 靠抽卡的話「這局準則有沒有成形」又變成運氣。
+export const capstoneOn = (g) => !!g?.doctrine && (g.stats?.depth ?? 0) >= CAPSTONE_FLOOR;
+
+// 這個單位「有沒有站遠打的選項」。制高準則用它分辨
+// 「選擇貼身」與「只能貼身」—— 前者該付代價，後者不該。
+const u_canRange = (u) => (u?.rg ?? 1) >= 2;
+
+// 身旁的隊友數（同隊、活著、曼哈頓距離 1）
+function alliesAround(g, u) {
+  if (!g.battle) return 0;
+  let n = 0;
+  for (const o of g.battle.units) {
+    if (!o.alive || o.tm !== u.tm || o.id === u.id) continue;
+    if (dist(o.x, o.y, u.x, u.y) === 1) n++;
+  }
+  return n;
+}
+
+// 這個單位「現在」的射程。
+// ⚠️ 所有射程判定都必須走這裡，包含渲染層畫可攻擊格的那一段。
+// 狙擊位（站掩體 +1 射程）是條件式的，只要有一個判定點沒改到，
+// 畫面上亮起來的格子就會跟實際打不打得到不一致 ——
+// 那比沒有這張卡更糟，玩家會學到「亮著的格子不可信」。
+export function rangeOf(g, u) {
+  let r = u.rg;
+  if (hasMod(u, 'perch') && g?.battle?.cover.has(key(u.x, u.y))) r += 1;
+  return r;
+}
+
 // 一次算完所有修正，並回傳每一項，這樣 UI 才能把「為什麼是這個數字」攤開給玩家看。
 // 戰鬥預測（聖火降魔錄真正的發明）靠的就是這個函式。
 //
@@ -606,6 +674,49 @@ export function damageBreakdown(g, attacker, target, skillMult = 1) {
     )) || null;
     if (guarded) traitMods.push({ n: '協防裝置', m: -2, good: 1 });
   }
+  // ── 戰術準則 ────────────────────────────────────────────
+  // 全部走 mul2()，所以每一條都會出現在出手前的傷害預測卡上。
+  const doc = doctrineOf(g);
+  const cap = capstoneOn(g);
+  if (doc && attacker.tm === 'p') {
+    if (doc.id === 'blitz') {
+      const line = cap ? doc.execHpCap : doc.execHp;
+      if (hasMod(attacker, 'execute') && target.hp <= target.mhp * line) mul2('處決程序', 1.4);
+      if (hasMod(attacker, 'frenzy') && (attacker.frenzy ?? 0) > 0) {
+        mul2(`狂熱 x${attacker.frenzy}`, 1 + 0.08 * attacker.frenzy);
+      }
+    }
+    if (doc.id === 'phalanx') {
+      if (alliesAround(g, attacker) > 0) mul2('密集陣', 1 + doc.adjAtk);
+      else mul2('落單', 1 + doc.aloneAtk);
+      if (hasMod(attacker, 'relay') && g.battle?.lastHitId === target.id
+          && g.battle?.lastHitBy !== attacker.id) {
+        mul2('接力指令', 1.25);
+      }
+    }
+    if (doc.id === 'overwatch') {
+      if (d >= 2) mul2('制高', 1 + doc.farAtk);
+      // 貼身懲罰只罰「本來可以站遠卻選擇貼上去」的單位。射程 1 的近戰
+      // 沒有第二個選項，罰它等於把準則變成「你的先鋒這局作廢」。
+      else if (u_canRange(attacker)) mul2('貼身', 1 + doc.nearAtk);
+    }
+    if (doc.id === 'resonance') {
+      if (elem > 1) mul2('解析', doc.elemUp);
+      else if (elem < 1) mul2('失諧', 1 + doc.elemDown);
+    }
+  }
+  // 密集陣的減傷掛在防守方身上，所以條件看的是 target 不是 attacker
+  let docFlat = 0;
+  if (doc?.id === 'phalanx' && target.tm === 'p') {
+    const near = alliesAround(g, target);
+    if (near > 0) {
+      docFlat += doc.adjDef;
+      if (hasMod(target, 'bulwark')) docFlat += near;
+      if (cap && near >= 2) docFlat += 2;
+      traitMods.push({ n: '密集陣掩護', m: -docFlat, good: 1 });
+    }
+  }
+
   // 蓄能：整個回合沒出手，下一刀更重
   if (hasMod(attacker, 'momentum') && attacker.charged) mul2('蓄能', 1.6);
   // 伏擊姿態：掩體原本只有防守價值，這張卡讓它變成攻守兩用的取捨
@@ -630,7 +741,7 @@ export function damageBreakdown(g, attacker, target, skillMult = 1) {
   }
   if (skillMult !== 1) traitMult *= skillMult;
 
-  const raw = attacker.atk + bonusMelee + bonusRanged - cover - aegis;
+  const raw = attacker.atk + bonusMelee + bonusRanged - cover - aegis - docFlat;
   const mid = Math.max(1, raw * elem * flankMult * traitMult);
 
   // 穩定性越高，區間越窄。stab 100 = 完全確定，stab 0 = 上下浮動 45%
@@ -649,6 +760,11 @@ export function damageBreakdown(g, attacker, target, skillMult = 1) {
     hi *= 1 - traitV(attacker, 'unreliable');
     note('unreliable', traitV(attacker, 'unreliable'));
   }
+  // 壓制射擊：距離拉到 3 格以上就不再往下浮動。
+  const farLocked = doc?.id === 'overwatch' && attacker.tm === 'p' && d >= doc.farLock
+    && (hasMod(attacker, 'suppress') || cap);
+  if (farLocked) { lo = 0; traitMods.push({ n: '壓制射擊', m: 1, good: 1 }); }
+
   const min = Math.max(1, Math.round(mid * (1 - lo)));
   const max = Math.max(min, Math.round(mid * (1 + hi)));
 
@@ -731,7 +847,7 @@ export function attackUnit(g, attacker, target, opts = {}) {
     if (attacker.attacked >= TUNE.ATTACKS_PER_TURN) return { ok: false, reason: '本回合已經攻擊過了' };
     if (hasStatus(attacker, 'stunned')) return { ok: false, reason: '武器系統被干擾' };
     const d = dist(attacker.x, attacker.y, target.x, target.y);
-    if (d > attacker.rg) return { ok: false, reason: '超出射程' };
+    if (d > rangeOf(g, attacker)) return { ok: false, reason: '超出射程' };
     attacker.ap -= 1;
     attacker.attacked = (attacker.attacked || 0) + 1;
   }
@@ -833,6 +949,23 @@ export function attackUnit(g, attacker, target, opts = {}) {
     }
   }
 
+  // 接力指令要知道「隊友剛剛打了誰」。記在戰場上而不是單位上，
+  // 因為它問的是這一擊跟上一擊的關係，不是某個人的屬性。
+  if (g.battle) { g.battle.lastHitId = target.id; g.battle.lastHitBy = attacker.id; }
+
+  // 連鎖共振：相剋命中就濺到目標旁邊。解析準則把「挑對屬性」
+  // 從單體加成變成範圍收益，這是它跟純數值加成最大的差別。
+  if (!opts.noEcho && roll.elem > 1 && hasMod(attacker, 'cascade')) {
+    for (const o of battleUnits(g)) {
+      if (!o.alive || o.tm === attacker.tm || o.id === target.id) continue;
+      if (dist(o.x, o.y, target.x, target.y) !== 1) continue;
+      o.hp -= 2;
+      o.hurtMs = 200;
+      log(g, `連鎖共振：${o.n} −2 HP。`);
+      if (o.hp <= 0) { o.hp = 0; o.alive = 0; log(g, `${o.n} 被擊破。`, true); }
+    }
+  }
+
   checkBattleEnd(g);
   if (attacker.tm === 'p' && g.battle?.phase === 'player') autoSelectNext(g, attacker);
   return { ok: true, dmg, killed };
@@ -919,6 +1052,18 @@ function grantXp(g, unit, amount) {
 }
 
 function onEnemyKilled(g, killer, victim) {
+  // 閃擊：擊破讓全隊多一點行動力。給「全隊」而不是只給擊破者，
+  // 這條才會變成戰術 —— 先手開一個缺口，讓後面兩個人踩著那個缺口進場。
+  const doc = doctrineOf(g);
+  if (doc?.id === 'blitz' && killer.tm === 'p') {
+    const back = capstoneOn(g) ? doc.killApCap : doc.killAp;
+    for (const u of aliveOf(g, 'p')) u.ap = Math.min(u.map, u.ap + back);
+    log(g, `閃擊：擊破後全隊回復 ${back} AP。`);
+  }
+  if (hasMod(killer, 'frenzy')) {
+    killer.frenzy = (killer.frenzy ?? 0) + 1;
+    log(g, `${killer.n} 狂熱疊到 ${killer.frenzy} 層。`);
+  }
   g.stats.kills++;
   if (g.battle.nodeType === 'elite' || victim.boss) g.stats.eliteKills++;
   if (killer.tm !== 'p') return;
@@ -955,12 +1100,24 @@ function draftSize(g) {
 }
 
 function cardPoolFor(g, u) {
-  return CARDS.filter((c) => {
+  const doc = doctrineOf(g);
+  // 專屬卡只進對應準則的池子。這是「複利」真正發生的地方 ——
+  // 光調權重的話，玩家感覺到的只是這局手氣好。
+  const base = doc
+    ? [...CARDS, ...DOCTRINE_CARDS.filter((c) => c.doc === doc.id)]
+    : CARDS;
+  return base.filter((c) => {
     if (c.id === 'rg') return u.rg < TUNE.RG_CAP;
     if (c.id === 'ap') return u.map < TUNE.AP_CAP;
     if (c.id === 'pa' || c.id === 'pr') return !u.path && u.lv >= 2;
     if (c.id === 'ul') return !!nextTreeNode(u);
+    if (c.mod && u.mods?.[c.id]) return false; // 同一張改玩法的卡不重複發
     return true;
+  }).map((c) => {
+    // 準則偏好：把自己路線上的卡加權，讓一條路真的走得成。
+    // 不是保證，只是傾向 —— 抽卡還是要有意外，否則就變成固定 build。
+    const m = doc?.bias?.[c.id];
+    return m ? { ...c, w: c.w * m } : c;
   });
 }
 
@@ -1086,6 +1243,9 @@ export function applyCard(g, u, id) {
     // 改寫規則的卡不動數值，只在單位身上留一個標記，由各自的 hook 讀。
     case 'riposte': case 'guard': case 'chain': case 'ambush':
     case 'adapt': case 'momentum':
+    // 準則專屬卡走同一條路：只留標記，效果由各自的 hook 讀
+    case 'frenzy': case 'execute': case 'bulwark': case 'relay':
+    case 'perch': case 'suppress': case 'attune': case 'cascade':
       u.mods = u.mods || {};
       u.mods[id] = 1;
       break;
@@ -1318,7 +1478,7 @@ function bestTarget(g, u, targets) {
   let best = null;
   for (const t of targets) {
     const d = dist(u.x, u.y, t.x, t.y);
-    const inRange = d <= u.rg ? 0 : 1;
+    const inRange = d <= rangeOf(g, u) ? 0 : 1;
     // 直接用「這一擊實際會造成多少傷害」評分，AI 就會自動學會利用相剋與側背，
     // 不用另外寫規則。分數取最小，所以傷害是負權重。
     const dmg = damageBreakdown(g, u, t).mid;
@@ -1360,9 +1520,9 @@ function bestMove(g, u, targets) {
     for (const t of targets) {
       const d = dist(tile.x, tile.y, t.x, t.y);
       if (d < minDist) minDist = d;
-      if (d <= u.rg) weakest = Math.min(weakest, t.hp);
+      if (d <= rangeOf(g, u)) weakest = Math.min(weakest, t.hp);
     }
-    const canShoot = minDist <= u.rg && remaining >= 1;
+    const canShoot = minDist <= rangeOf(g, u) && remaining >= 1;
 
     let score = 0;
     if (canShoot) {
@@ -1392,7 +1552,7 @@ export function planEnemy(g, u, dry = false) {
   if (!living.length || !u.alive) return null;
 
   const target0 = bestTarget(g, u, living);
-  const canShootFromHere = target0 && dist(u.x, u.y, target0.x, target0.y) <= u.rg;
+  const canShootFromHere = target0 && dist(u.x, u.y, target0.x, target0.y) <= rangeOf(g, u);
   const move = (!canShootFromHere && u.ap > 0) ? bestMove(g, u, living) : null;
   const willMove = !!(move && move.cost <= u.ap);
 
@@ -1404,9 +1564,9 @@ export function planEnemy(g, u, dry = false) {
     u.x = move.x; u.y = move.y;
     target = bestTarget(g, u, living);
     if (target) faceToward(u, target.x, target.y);
-    if (target && dist(u.x, u.y, target.x, target.y) <= u.rg) dmg = damageBreakdown(g, u, target);
+    if (target && dist(u.x, u.y, target.x, target.y) <= rangeOf(g, u)) dmg = damageBreakdown(g, u, target);
     u.x = ox; u.y = oy; u.faceX = ofx; u.faceY = ofy;
-  } else if (target && dist(u.x, u.y, target.x, target.y) <= u.rg) {
+  } else if (target && dist(u.x, u.y, target.x, target.y) <= rangeOf(g, u)) {
     dmg = damageBreakdown(g, u, target);
   }
 
@@ -1429,7 +1589,7 @@ export function planEnemy(g, u, dry = false) {
   if (willMove) moveUnit(g, u, move.x, move.y);
   const now = bestTarget(g, u, aliveOf(g, 'p'));
   if (now && u.alive && !u.attacked && u.ap >= 1
-      && !stunned && dist(u.x, u.y, now.x, now.y) <= u.rg) {
+      && !stunned && dist(u.x, u.y, now.x, now.y) <= rangeOf(g, u)) {
     attackUnit(g, u, now);
   } else if (stunned) {
     log(g, `${u.n} 受到干擾，無法開火。`);
@@ -1774,6 +1934,7 @@ export function finishRun(g, won) {
     won,
     cores,
     depthLv: g.depth,
+    doctrine: g.doctrine,
     depth: g.stats.depth,
     kills: g.stats.kills,
     eliteKills: g.stats.eliteKills,
@@ -1791,6 +1952,7 @@ export function finishRun(g, won) {
   g.pending.shop = null;
   g.pending.supply = null;
   g.pending.victory = null;
+  g.pending.doctrine = null;
   g.screen = 'result';
   log(g, won ? `任務完成，取得 ${cores} 核心碎片。` : `任務失敗，回收 ${cores} 核心碎片。`, true);
 }

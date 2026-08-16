@@ -9,7 +9,7 @@ import {
   serializeState, log, queueDraft, closeVictory,
   openRecruit, toggleRecruit, confirmRecruit, buyRepair, setDraftTarget, armSkill, cancelSkill,
   enemyIntents,
-} from './engine.js';
+ chooseDoctrine,} from './engine.js';
 import { loadMeta, saveMeta, buyUpgrade, recordRun, resetMeta, setDepth } from './meta.js';
 import { nextTip, markSeen, setTutorial, resetTutorial, tutorialProgress } from './tutorial.js';
 import { loadAssets, assetCount } from './assets.js';
@@ -181,6 +181,11 @@ const actions = {
     saveMeta(meta);
     playSfx('ui', 660);
     ui.invalidate();
+  },
+
+  doctrine(id) {
+    const res = chooseDoctrine(g, id);
+    if (res.ok) { playSfx('level', 560); ui.invalidate(); }
   },
 
   buy(id) {
@@ -471,6 +476,9 @@ window.__audio = () => audioState();
 // 一鍵驗證：跑完一整段核心流程（開 run → 進戰鬥 → 打贏 → 回地圖）
 window.test_run_full_flow = () => {
   newRun('playwright-fixture');
+  // 準則是每一局的必經步驟，測試也要走完 —— 跳過的話測到的是
+  // 一個玩家永遠不會遇到的狀態（g.doctrine = null，所有 hook 靜靜跳過）。
+  chooseDoctrine(g, 'blitz');
   const firstNode = g.map.nodes[g.currentNodeId].next[0];
   enterNode(g, firstNode);
   const enteredBattle = g.screen === 'battle';

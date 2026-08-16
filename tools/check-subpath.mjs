@@ -56,6 +56,8 @@ const screen = await page.evaluate(() => (window.__game ? window.__game().screen
 const played = await page.evaluate(() => {
   try {
     window.game_actions.startRun();
+    window.game_actions.recruitGo();
+    window.game_actions.doctrine('blitz');
     const g = window.__game();
     window.game_actions.goNode(g.map.nodes[g.currentNodeId].next[0]);
     return { screen: g.screen, units: g.battle ? g.battle.units.length : 0 };

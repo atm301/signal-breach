@@ -59,7 +59,9 @@ const audio = await page.evaluate(async () => {
   }
   return { ...window.__audio(), level: peak };
 });
-await page.evaluate(() => { window.game_actions.startRun(); });
+await page.evaluate(() => { window.game_actions.startRun();
+window.game_actions.recruitGo();
+window.game_actions.doctrine('blitz'); });
 await page.waitForTimeout(200);
 const audioInRun = await page.evaluate(() => window.__audio());
 
@@ -107,6 +109,8 @@ const deterministic = await page.evaluate(() => {
 const metaPersist = await page.evaluate(() => {
   localStorage.removeItem('sft_meta_v1');
   window.game_actions.startRun();
+window.game_actions.recruitGo();
+window.game_actions.doctrine('blitz');
   window.game_actions.goNode(window.__game().map.nodes[window.__game().currentNodeId].next[0]);
   window.game_actions.toHub(); // 放棄出擊 → 結算 → 存檔
   const raw = localStorage.getItem('sft_meta_v1');
@@ -123,6 +127,8 @@ const metaPersist = await page.evaluate(() => {
 //    （曾經出現過在結算畫面上還能幫死掉的 run 選卡片）
 const cleanupOnFinish = await page.evaluate(() => {
   window.game_actions.startRun();
+window.game_actions.recruitGo();
+window.game_actions.doctrine('blitz');
   const g = window.__game();
   window.__debug.queueDraft(g.squad[0].id, 'levelup');
   const hadDraft = !!g.pending.draft;
@@ -154,6 +160,8 @@ const before = await page.evaluate(({ src }) => {
   // eslint-disable-next-line no-new-func
   const sig = new Function(`return (${src})`)();
   window.game_actions.startRun();
+window.game_actions.recruitGo();
+window.game_actions.doctrine('blitz');
   const g = window.__game();
   // 走兩步，讓存檔不是「剛開始」那種沒內容的狀態
   window.game_actions.goNode(g.map.nodes[g.currentNodeId].next[0]);

@@ -15,7 +15,7 @@ import {
   buyShopItem, leaveShop, chooseSupply, closeSupply, closeVictory,
   repairOptions, buyRepair, setFocus,
   skillsOf, skillState, validSkillTiles, castSkill,
-} from '../src/engine.js';
+ chooseDoctrine, doctrineOf } from '../src/engine.js';
 import { META_UPGRADES, TUNE, FLOORS } from '../src/data.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,7 +37,8 @@ const META_MODE = args.meta ?? 'none';
 // 用來量「單一升級到底貢獻幾個百分點」——
 // 三個新升級一起加下去把通關率從 47% 推到 79%，不拆開量就只能亂猜是誰的問題。
 const DROP = String(args.drop ?? '').split(',').filter(Boolean);
-const DEPTH = Number(args.depth ?? 0); // 威脅等級：驗證階梯是不是單調變難
+const DEPTH = Number(args.depth ?? 0);
+const DOC = args.doctrine ?? null; // 準則：null = 不選（對照組） // 威脅等級：驗證階梯是不是單調變難
 
 function metaFor(mode) {
   const lvl = (u) => {
@@ -98,6 +99,24 @@ function bestPlayerMove(g, u, foes) {
     score -= minDist * 4;
     if (g.battle.cover.has(key(tile.x, tile.y))) score += u.rg >= 2 ? 12 : 5;
     if (u.rg >= 2 && minDist <= 1) score -= 14; // 狙擊不想被貼身
+
+    // ⚠️ 準則意識。沒有這一段的話，這支模擬器量到的是
+    // 「一個不懂準則的人硬走準則」—— 密集陣不會靠攏、制高拼命衝臉，
+    // 因為上面那條 -minDist*4 一路把人往前推。
+    // 拿那種數字調平衡，會把位置型準則調到對真人過強。
+    // （傷害面的差異 projected() 已經算進去了，這裡只補走位傾向。）
+    const doc = doctrineOf(g);
+    if (doc?.id === 'phalanx') {
+      let near = 0;
+      for (const m of aliveOf(g, 'p')) {
+        if (m.id !== u.id && dist(m.x, m.y, tile.x, tile.y) === 1) near++;
+      }
+      score += near * 18;
+    }
+    if (doc?.id === 'overwatch' && u.rg >= 2) {
+      score += minDist * 4;          // 抵銷上面那條「往前壓」
+      if (minDist >= 2) score += 16;
+    }
 
     if (!best || score > best.score) best = { ...tile, score };
   }
@@ -327,8 +346,11 @@ function botBattle(g) {
 
 // ---------------------------------------------------------------- 跑一場
 
-function playRun(seed, meta) {
+function playRun(seed, meta, doctrine = DOC) {
   const g = createGame({ seed, meta, depth: DEPTH });
+  // 模擬器不走選人畫面，準則直接指定。
+  // 每條準則都要能單獨跑，否則「多流派」只是選單上有四個選項。
+  if (doctrine) { g.pending.doctrine = { options: [doctrine] }; chooseDoctrine(g, doctrine); }
   let guard = 0;
 
   while (g.screen !== 'result' && guard++ < 600) {
@@ -357,6 +379,9 @@ function summarize(g) {
     cores: r?.cores ?? 0,
     credits: g.credits,
     levels: g.squad.map((u) => u.lv),
+    // 全隊拿到的「改玩法」卡。量 build 分歧度一定要有這個維度 ——
+    // 只看等級分佈的話，兩局各拿到完全不同的六張卡也會被算成同一種。
+    modIds: [...new Set(g.squad.flatMap((u) => Object.keys(u.mods ?? {})))],
     unlocks: g.squad.map((u) => Object.keys(u.ul).length),
     skillUses: g.stats.skillUses ?? 0,
   };

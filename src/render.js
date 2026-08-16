@@ -5,7 +5,7 @@ import { GRID, FLOORS, NODE_TYPES, ELEMENTS, CONDITION_BY_ID } from './data.js';
 import {
   key, dist, reachableTiles, aliveOf, unitById, availableNodes, damageBreakdown,
   validSkillTiles,
-} from './engine.js';
+ rangeOf,} from './engine.js';
 import { unitSprite, coverSprite, nodeIcon, uiSprite } from './assets.js';
 
 const PAD = 56;
@@ -259,7 +259,7 @@ function drawHighlights(ctx, g, cell) {
 
   if (u.attacked < 1 && u.ap >= 1) {
     for (const e of aliveOf(g, 'e')) {
-      if (dist(u.x, u.y, e.x, e.y) > u.rg) continue;
+      if (dist(u.x, u.y, e.x, e.y) > rangeOf(g, u)) continue;
       const px = PAD + e.x * cell;
       const py = PAD + e.y * cell;
       ctx.fillStyle = 'rgba(255,134,120,.24)';
@@ -688,7 +688,7 @@ function drawForecast(ctx, g, cell, hoverTile) {
   if (!foe) return;
 
   const f = damageBreakdown(g, me, foe);
-  const inRange = f.dist <= me.rg;
+  const inRange = f.dist <= rangeOf(g, me);
   const blocked = me.attacked >= 1 || me.ap < 1;
 
   const rows = [];
@@ -700,7 +700,7 @@ function drawForecast(ctx, g, cell, hoverTile) {
     c: '#9fb8c8',
   });
 
-  const head = !inRange ? `射程外（距離 ${f.dist} / 射程 ${me.rg}）`
+  const head = !inRange ? `射程外（距離 ${f.dist} / 射程 ${rangeOf(g, me)}）`
     : blocked ? '本回合已出手'
     : f.min === f.max ? `${f.min} 傷害` : `${f.min} – ${f.max} 傷害`;
   const verdict = !inRange || blocked ? null

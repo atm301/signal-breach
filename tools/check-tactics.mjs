@@ -383,6 +383,7 @@ const recruitUi = await page.evaluate(() => {
   window.game_actions.recruit(first); // 還原
   const okBefore = !!gg.pending.recruit;
   window.game_actions.recruitGo();
+  window.game_actions.doctrine('blitz'); // 準則是必經步驟
   return {
     shown: panel.includes('編隊出擊'),
     listsAllRecruits: gg.recruits.every((u) => panel.includes(u.n)),
@@ -442,6 +443,7 @@ await page.evaluate(() => window.game_actions.startRun());
 await page.waitForFunction(() => document.getElementById('panel').innerText.includes('編隊出擊'),
   null, { timeout: 5000 }).catch(() => {});
 await page.evaluate(() => window.game_actions.recruitGo());
+await page.evaluate(() => window.game_actions.doctrine('blitz'));
 
 // 屬性上色只能動「青藍色發光」，不准碰重創狀態的橘色火花。
 // 第一版用 ctx.filter hue-rotate 整張轉，橘色火花變成洋紅 ——
@@ -670,6 +672,7 @@ const aiPhase = await page.evaluate(async () => {
   window.game_actions.toHub();
   window.game_actions.startRun();
   window.game_actions.recruitGo();
+  window.game_actions.doctrine('blitz'); // 準則是必經步驟
   for (let i = 0; i < 6; i++) {
     const gm = window.__game();
     if (gm.screen === 'battle') break;
@@ -863,6 +866,7 @@ const skillRuntime = await page.evaluate(async () => {
   window.game_actions.toHub();
   window.game_actions.startRun();
   window.game_actions.recruitGo();
+  window.game_actions.doctrine('blitz'); // 準則是必經步驟
   for (let i = 0; i < 6; i++) {
     const gm = window.__game();
     if (gm.screen === 'battle') break;

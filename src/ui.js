@@ -5,11 +5,11 @@ import { CHANGELOG, VERSION } from './changelog.js';
 import {
   TREE, META_UPGRADES, NODE_TYPES, FLOORS, CREDITS, CREDITS_META, ELEMENTS, TUNE, TRAITS, traitV,
   SKILLS, PATH_NAMES, treeNodeInfo,
- DEPTHS, MAX_DEPTH,} from './data.js';
+ DEPTHS, MAX_DEPTH, DOCTRINES, DOCTRINE_BY_ID, CAPSTONE_FLOOR,} from './data.js';
 import {
   availableNodes, squadAlive, xpToNext, unitById, actableUnits, damageBreakdown, dist,
   repairOptions, skillsOf, skillState, skillCd,
-} from './engine.js';
+ rangeOf,} from './engine.js';
 import { upgradeList } from './meta.js';
 import { tutorialProgress } from './tutorial.js';
 import { playSfx } from './audio.js';
@@ -133,6 +133,14 @@ function panelHtml(g, meta, opts) {
     return parts.join('');
   }
 
+  // 選準則跟編隊一樣要接管畫面：這是整局唯一一次不可逆的選擇，
+  // 不該跟地圖節點擠在同一頁讓人順手點過去。
+  if (g.pending.doctrine && g.screen === 'map') {
+    parts.push(doctrinePanel(g));
+    parts.push(logPanel(g));
+    return parts.join('');
+  }
+
   switch (g.screen) {
     case 'hub': parts.push(hubPanel(g, meta)); break;
     case 'map': parts.push(mapPanel(g)); break;
@@ -147,6 +155,7 @@ function panelHtml(g, meta, opts) {
 
   if (g.pending.draft) parts.push(draftPanel(g));
   if (g.screen !== 'hub' && g.screen !== 'result') {
+    parts.push(doctrineBadge(g));
     parts.push(squadPanel(g));
     parts.push(treePanel(g));
   }
@@ -464,6 +473,48 @@ function battlePanel(g) {
 // 這是整場出擊裡「資訊最完整、風險最低」的一次決策 ——
 // 你看得到所有數值與詞條，還沒有任何損失。Roguelike 的第一個選擇就該長這樣：
 // 不是賭運氣，是在五份已知的取捨裡選一組能互補的。
+// 戰術準則選擇。四張並列、代價寫在同一張卡上 ——
+// 把代價藏到選完才說，玩家會覺得被騙；寫在臉上，那才是取捨。
+function doctrinePanel(g) {
+  const cards = DOCTRINES.map((d) => `
+    <div class="item doc" data-act="doctrine:${d.id}">
+      <div class="item-head">
+        <b>${esc(d.n)}</b>
+        <span class="tag">${esc(d.tag)}</span>
+      </div>
+      <div class="item-body">
+        ${esc(d.d)}<br>
+        <span class="doc-cap">F${CAPSTONE_FLOOR} 解鎖：${esc(d.capstone)}</span>
+      </div>
+    </div>`).join('');
+
+  return `
+    <section>
+      <h2>戰術準則</h2>
+      <p class="hint">
+        這一次出擊只能選一個，之後不能改。<br>
+        準則會讓改裝抽卡偏向自己的路線，並解鎖<b>只有這條路拿得到的專屬卡</b>。
+      </p>
+      ${cards}
+    </section>`;
+}
+
+// 出擊中顯示目前準則與解鎖進度。沒有這一條的話，玩家選完就忘了
+// 自己在走哪條路，那些加成會變成「數字有時候怪怪的」。
+function doctrineBadge(g) {
+  const d = DOCTRINE_BY_ID[g.doctrine];
+  if (!d) return '';
+  const on = (g.stats?.depth ?? 0) >= CAPSTONE_FLOOR;
+  return `
+    <section class="docbar">
+      <div class="item-head">
+        <b>準則・${esc(d.n)}</b>
+        <span class="tag${on ? ' clean' : ''}">${on ? '已解鎖 F' + CAPSTONE_FLOOR : `F${CAPSTONE_FLOOR} 解鎖`}</span>
+      </div>
+      <div class="item-body">${esc(d.d)}<br><span class="doc-cap">${esc(d.capstone)}</span></div>
+    </section>`;
+}
+
 function recruitPanel(g) {
   const r = g.pending.recruit;
   if (!r) return '';
@@ -573,7 +624,7 @@ function skillBar(g, sel, isPlayer) {
 function forecastList(g, sel, isPlayer) {
   if (!isPlayer || !sel || !sel.alive) return '';
   const foes = g.battle.units
-    .filter((u) => u.alive && u.tm === 'e' && dist(sel.x, sel.y, u.x, u.y) <= sel.rg)
+    .filter((u) => u.alive && u.tm === 'e' && dist(sel.x, sel.y, u.x, u.y) <= rangeOf(g, sel))
     .map((u) => ({ u, f: damageBreakdown(g, sel, u) }))
     .sort((a, bb) => bb.f.mid - a.f.mid);
   if (!foes.length) return '';
