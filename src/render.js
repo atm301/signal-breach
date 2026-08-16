@@ -918,19 +918,48 @@ export function renderTitle(ctx, size, time, opts = {}) {
 }
 
 // 空畫面（大廳與結算時 canvas 不畫棋盤）
-export function renderIdle(ctx, g, size, title) {
+// 大廳與結算畫面。
+//
+// 這三個畫面（作戰基地 / 出擊成功 / 出擊失敗）原本是一塊漸層加一行字 ——
+// 而玩家每一局至少會看到兩次。三張各自的底圖，讓「回到基地」跟
+// 「這一局結束了」在視覺上是不同的兩件事，而不是同一個空盒子換字。
+export function renderIdle(ctx, g, size, title, mood = 'hub') {
   ctx.clearRect(0, 0, size, size);
-  const grad = ctx.createRadialGradient(size * 0.5, size * 0.35, 10, size * 0.5, size * 0.5, size * 0.75);
-  grad.addColorStop(0, '#1d3242');
-  grad.addColorStop(1, '#0b151c');
-  ctx.fillStyle = grad;
+
+  const art = uiSprite(mood === 'win' ? 'idle-win' : mood === 'lose' ? 'idle-lose' : 'idle-hangar');
+  if (art) {
+    ctx.drawImage(art, 0, 0, size, size);
+  } else {
+    const grad = ctx.createRadialGradient(size * 0.5, size * 0.35, 10, size * 0.5, size * 0.5, size * 0.75);
+    grad.addColorStop(0, '#1d3242');
+    grad.addColorStop(1, '#0b151c');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+  }
+
+  // 中央壓一層徑向暗幕再放字。撤離那張中間是亮天空，
+  // 沒有這層的話白字直接消失在雲裡。
+  const scrim = ctx.createRadialGradient(size * 0.5, size * 0.48, size * 0.05, size * 0.5, size * 0.48, size * 0.55);
+  scrim.addColorStop(0, 'rgba(8,14,19,.82)');
+  scrim.addColorStop(0.55, 'rgba(8,14,19,.55)');
+  scrim.addColorStop(1, 'rgba(8,14,19,0)');
+  ctx.fillStyle = scrim;
   ctx.fillRect(0, 0, size, size);
-  ctx.fillStyle = 'rgba(213,228,235,.9)';
-  ctx.font = `bold ${Math.round(size * 0.055)}px ${FONT}`;
+
   ctx.textAlign = 'center';
+  ctx.fillStyle = mood === 'win' ? '#bff0cf' : mood === 'lose' ? '#f5c3ca' : 'rgba(224,238,245,.95)';
+  ctx.font = `bold ${Math.round(size * 0.058)}px ${FONT}`;
   ctx.fillText(title, size / 2, size * 0.48);
+
+  const sub = mood === 'win' ? '任務完成，返航中'
+    : mood === 'lose' ? '訊號中斷'
+      : '待命中';
+  ctx.fillStyle = 'rgba(190,210,222,.6)';
+  ctx.font = `${Math.round(size * 0.024)}px ${FONT}`;
+  ctx.fillText(sub, size / 2, size * 0.48 + Math.round(size * 0.05));
   ctx.textAlign = 'start';
 }
+
 
 // 敵方意圖：這一回合每隻敵人打算走去哪、打誰、打多重。
 //

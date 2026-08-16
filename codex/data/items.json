@@ -182,6 +182,33 @@
       "prompt": "A square 1:1 game asset sheet containing exactly 9 top-down military science-fiction infantry tokens, laid out in a clean 3 by 3 grid: 3 rows and 3 columns, with equal generous flat magenta gaps between every subject. No subject may touch, overlap or cast anything onto another. All 9 subjects are drawn at exactly the same scale, each one centred in its own invisible cell, each with a compact footprint that would fit inside a circle. Every figure is seen from STRAIGHT OVERHEAD: you see the top of the helmet, the tops of the shoulders and the weapon foreshortened flat against the body. Within each row the armour design, the colour scheme, the equipment and the silhouette are IDENTICAL - it is the exact same soldier three times - and ONLY the battle damage changes across the columns. Column 1 (left) = pristine, undamaged, fully intact armour. Column 2 (middle) = moderately damaged: armour plates dented and scorched black, one shoulder plate cracked open, a thin wisp of smoke. Column 3 (right) = critically damaged: armour shattered open, internal structural frame exposed, torn cabling hanging loose, sparks and glowing orange hot fractures. ROW 1 is a VANGUARD BREACHER assault trooper: bulky heavy frontline exosuit with a rounded riot-shield plate bolted onto the left shoulder, very thick angular pauldrons, a stubby drum-fed shotgun held across the chest, a wide horizontal cyan-blue glowing visor band across the helmet and cyan-blue trim on the shield plate. ROW 2 is a SNIPER SPOTTER marksman: slim lightweight low-profile recon suit, a long-barrelled precision rifle with a folded bipod extending forward past the head, a flat rectangular sensor plate mounted on the back instead of a cloak, and twin small cyan-blue glowing optic lenses. ROW 3 is an ENGINEER DRONE-HANDLER support trooper: medium-weight suit with a bulky cylindrical backpack canister and a folded launch rail, a compact submachine gun in one hand and a heavy clamp manipulator on the other side, a ring of small cyan-blue indicator lights around the canister.",
       "image": "items/sheet-player-squad-b.png",
       "generated_at": "2026-08-11T19:18:05.597Z"
+    },
+    {
+      "id": "idle-hangar",
+      "name": "作戰基地 底圖",
+      "slice": false,
+      "style_override": "Style: grounded military science-fiction concept art rendered as a game background plate. Muted desaturated palette built on gunmetal grey #3A4750, worn steel #6B7B8C and deep hangar shadow #0C151C, with small restrained cyan-blue #5DB6FF emissive accents. Single cool key light, soft ambient occlusion, no lens flare, no bloom, no film grain. Deliberately low contrast in the centre third of the frame because large white text will be laid over it and must stay readable. Fills the entire frame edge to edge. No text, no letters, no numbers, no labels, no readouts, no watermark, no signature, no logo, no frame, no border.",
+      "prompt": "A square 1:1 background plate: the interior of a subterranean military dropship hangar seen from a high three-quarter angle. Three matte gunmetal armoured personnel carriers sit parked in a row on a scuffed concrete deck marked with faded yellow guide lines. Overhead gantry cranes and cable looms cross the dark ceiling. Along the far wall, racks of armour plating and ammunition crates stand under dim strip lighting. Thin cyan indicator lights glow on the vehicle flanks. The centre of the image is open empty deck in shadow, deliberately uncluttered and dim. Cold, quiet, between missions. No people visible.",
+      "image": "items/idle-hangar.png",
+      "generated_at": "2026-08-16T21:42:31.717Z"
+    },
+    {
+      "id": "idle-win",
+      "name": "出擊成功 底圖",
+      "slice": false,
+      "style_override": "Style: grounded military science-fiction concept art rendered as a game background plate. Muted desaturated palette built on gunmetal grey #3A4750, worn steel #6B7B8C and deep hangar shadow #0C151C, with small restrained cyan-blue #5DB6FF emissive accents. Single cool key light, soft ambient occlusion, no lens flare, no bloom, no film grain. Deliberately low contrast in the centre third of the frame because large white text will be laid over it and must stay readable. Fills the entire frame edge to edge. No text, no letters, no numbers, no labels, no readouts, no watermark, no signature, no logo, no frame, no border.",
+      "prompt": "A square 1:1 background plate: a dropship lifting off from a ruined rooftop landing pad at dawn, seen from a distant low angle. The aircraft is a matte gunmetal military VTOL with cyan running lights, silhouetted against a pale cold sunrise breaking through smoke. Below it the shattered concrete pad, twisted rebar and a toppled comms mast. Thin drifting smoke, no fire. The centre of the frame is open pale sky, low contrast and uncluttered. The mood is exhausted relief, not triumph. No people visible.",
+      "image": "items/idle-win.png",
+      "generated_at": "2026-08-16T21:44:23.359Z"
+    },
+    {
+      "id": "idle-lose",
+      "name": "出擊失敗 底圖",
+      "slice": false,
+      "style_override": "Style: grounded military science-fiction concept art rendered as a game background plate. Muted desaturated palette built on gunmetal grey #3A4750, worn steel #6B7B8C and deep hangar shadow #0C151C, with small restrained cyan-blue #5DB6FF emissive accents. Single cool key light, soft ambient occlusion, no lens flare, no bloom, no film grain. Deliberately low contrast in the centre third of the frame because large white text will be laid over it and must stay readable. Fills the entire frame edge to edge. No text, no letters, no numbers, no labels, no readouts, no watermark, no signature, no logo, no frame, no border.",
+      "prompt": "A square 1:1 background plate: an abandoned battlefield at dusk seen from a high three-quarter angle. A wrecked matte gunmetal combat walker lies half collapsed on cracked concrete, one leg buckled, armour plating scorched and split, a single cyan indicator still faintly blinking. Scattered debris, spent shell casings and a torn unit banner half buried in dust. Cold blue-grey light, thin haze, no fire and no bright embers. The centre of the frame is open empty ground in shadow, low contrast and uncluttered. Silent and still. No people visible.",
+      "image": "items/idle-lose.png",
+      "generated_at": "2026-08-16T21:45:52.374Z"
     }
   ]
 }

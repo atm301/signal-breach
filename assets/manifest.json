@@ -64,6 +64,9 @@
     "icon-supply"
   ],
   "ui": [
+    "idle-hangar",
+    "idle-lose",
+    "idle-win",
     "panel-backdrop",
     "title-bg"
   ]

@@ -83,20 +83,51 @@
           "image": "items/panel-backdrop.png"
         }
       ]
+    },
+    {
+      "date": "2026-08-12",
+      "generated": 1,
+      "limit": 20,
+      "sessions": [
+        {
+          "id": "sheet-player-squad-b",
+          "kind": "item",
+          "timestamp": "2026-08-11T19:18:05.598Z",
+          "elapsed_seconds": 61.4,
+          "codex_session": "019ff241-cbd6-7d70-8683-9c15a1a9a1cc",
+          "image": "items/sheet-player-squad-b.png"
+        }
+      ]
     }
   ],
   "today": {
-    "date": "2026-08-12",
-    "generated": 1,
+    "date": "2026-08-17",
+    "generated": 3,
     "limit": 20,
     "sessions": [
       {
-        "id": "sheet-player-squad-b",
+        "id": "idle-hangar",
         "kind": "item",
-        "timestamp": "2026-08-11T19:18:05.598Z",
-        "elapsed_seconds": 61.4,
-        "codex_session": "019ff241-cbd6-7d70-8683-9c15a1a9a1cc",
-        "image": "items/sheet-player-squad-b.png"
+        "timestamp": "2026-08-16T21:42:31.718Z",
+        "elapsed_seconds": 79,
+        "codex_session": "01a00c85-a892-7fb2-9ae7-6fb89c5e582e",
+        "image": "items/idle-hangar.png"
+      },
+      {
+        "id": "idle-win",
+        "kind": "item",
+        "timestamp": "2026-08-16T21:44:23.361Z",
+        "elapsed_seconds": 56.9,
+        "codex_session": "01a00c87-9a1b-7051-be07-4e87cbf58ad6",
+        "image": "items/idle-win.png"
+      },
+      {
+        "id": "idle-lose",
+        "kind": "item",
+        "timestamp": "2026-08-16T21:45:52.376Z",
+        "elapsed_seconds": 49.3,
+        "codex_session": "01a00c89-14ab-7a31-9dad-69a07c5b8061",
+        "image": "items/idle-lose.png"
       }
     ]
   }

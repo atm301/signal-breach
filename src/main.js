@@ -405,7 +405,10 @@ function draw(time) {
     renderTitle(ctx, size, time, { mode: g.screen, audioStarted: audioState().started });
   } else if ((g.screen === 'battle' || g.screen === 'victory') && g.battle) renderBattle(ctx, g, size, time, fxList, hoverTile, enemyIntents(g));
   else if (g.screen === 'hub') renderIdle(ctx, g, size, '作戰基地');
-  else if (g.screen === 'result') renderIdle(ctx, g, size, g.result?.won ? '出擊成功' : '出擊失敗');
+  else if (g.screen === 'result') {
+    const won = !!g.result?.won;
+    renderIdle(ctx, g, size, won ? '出擊成功' : '出擊失敗', won ? 'win' : 'lose');
+  }
   else renderMap(ctx, g, size, time, hoverNodeId);
 }
 
