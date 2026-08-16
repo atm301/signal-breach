@@ -5,7 +5,7 @@
 import {
   GRID, FLOORS, TUNE, ROLES, PLAYER_TEMPLATES, ENEMY_ARCHETYPES, BOSSES,
   TREE, PASS, CARDS, CARD_BY_ID, COVER_PATTERNS, EVENTS, SHOP_SERVICES, SKILLS, STATUS,
-  RARITY, coresEarned, elementMultiplier,
+  RARITY, coresEarned, elementMultiplier, ELEMENTS, ELEMENT_KEYS, CONDITIONS, CONDITION_BY_ID, depthOf,
   TRAITS, GOOD_TRAITS, BAD_TRAITS, CALLSIGNS, traitV, hasTrait,
 } from './data.js';
 import { makeRng, hashSeed, readableSeed } from './rng.js';
@@ -160,7 +160,7 @@ export function rollRecruits(rng, meta, n = TUNE.RECRUIT_POOL, lookRng = rng) {
   ));
 }
 
-export function createGame({ seed, meta = { upgrades: {} } } = {}) {
+export function createGame({ seed, meta = { upgrades: {} }, depth = 0 } = {}) {
   const seedInput = seed ?? Math.floor(Math.random() * 1e9);
   const rng = makeRng(hashSeed(seedInput));
   const labelRng = makeRng(hashSeed(`${seedInput}-label`));
@@ -169,6 +169,8 @@ export function createGame({ seed, meta = { upgrades: {} } } = {}) {
 
   const g = {
     seed: String(seedInput),
+    // 威脅等級。通關解鎖，玩家自己選要不要挑戰。修正累積疊加。
+    depth: Math.max(0, depth | 0),
     seedLabel: readableSeed(labelRng),
     rng,
     meta,
@@ -199,7 +201,7 @@ export function createGame({ seed, meta = { upgrades: {} } } = {}) {
     sfxQueue: [],
   };
 
-  g.recruits = rollRecruits(rng, meta, TUNE.RECRUIT_POOL, lookRng);
+  g.recruits = rollRecruits(rng, meta, depthOf(g.depth).pool ?? TUNE.RECRUIT_POOL, lookRng);
   g.squad = g.recruits.slice(0, TUNE.SQUAD_SIZE);
   g.focusId = g.squad[0]?.id ?? null;
   g.currentNodeId = g.map.startId;
@@ -357,7 +359,8 @@ function scaleFor(node) {
 function makeEnemy(g, archetype, scale, index) {
   const spawns = [[4, 0], [2, 0], [3, 1], [1, 0], [3, 0], [1, 1]];
   const [x, y] = spawns[index] || [index % GRID, 0];
-  const hp = Math.max(3, Math.round(archetype.hp * scale * TUNE.ENEMY_HP_MULT * (1 - g.flags.weaken)));
+  const D = depthOf(g.depth);
+  const hp = Math.max(3, Math.round(archetype.hp * scale * TUNE.ENEMY_HP_MULT * (D.hpMult ?? 1) * (1 - g.flags.weaken)));
   return {
     id: uid(),
     tm: 'e',
@@ -367,7 +370,7 @@ function makeEnemy(g, archetype, scale, index) {
     boss: archetype.boss ? 1 : 0,
     mhp: hp,
     hp,
-    atk: Math.max(1, Math.round(archetype.atk * (1 + (scale - 1) * TUNE.ENEMY_ATK_SCALE))),
+    atk: Math.max(1, Math.round(archetype.atk * TUNE.ENEMY_ATK_MULT * (D.atkMult ?? 1) * (1 + (scale - 1) * TUNE.ENEMY_ATK_SCALE))),
     rg: archetype.rg,
     el: archetype.el,
     stab: archetype.stab ?? 60,
@@ -419,8 +422,17 @@ export function startBattle(g, node) {
     u.st = {};
   });
 
+  const D = depthOf(g.depth);
+  // 戰場狀況：每一場開打前抽一個，寫在畫面最上面。
+  // 它不是隨機懲罰 —— 玩家在按「進入」之前就知道，可以先挑路線。
+  const cpool = D.alwaysCond ? CONDITIONS.filter((c) => !c.plain) : CONDITIONS;
+  const cond = (node.type === 'boss' && D.bossCond)
+    ? g.rng.weighted(CONDITIONS.filter((c) => !c.plain))
+    : g.rng.weighted(cpool);
+
   g.battle = {
     nodeId: node.id,
+    cond: cond.id,
     nodeType: node.type,
     floor: node.floor,
     cover: coverFor(g),
@@ -433,7 +445,31 @@ export function startBattle(g, node) {
     actingId: null, // 敵方階段中正在行動的那一隻，給渲染層標示用
     armedSkill: null, // 玩家點了技能、正在等他指定目標
     downed: [],
+    surged: 0,
   };
+  // 戰場狀況的即時效果。放在單位都就位之後才跑，
+  // 因為 jam/overclock 是直接改場上每一隻的數值。
+  if (cond.onStart) cond.onStart(g);
+  if (cond.extraCover) {
+    // 掩體加倍：再抽一組疊上去，而不是把既有的往外長 ——
+    // 往外長會讓原本的圖形失真，玩家對「這張圖大概長怎樣」的直覺就沒了。
+    for (const t of coverFor(g)) g.battle.cover.add(t);
+  }
+
+  // 適應塗層：開打時自動改成剋制場上最多敵人的那一系。
+  // 放在這裡而不是每次攻擊時算，玩家在下第一步之前就看得到自己是什麼屬性。
+  for (const u of alive) {
+    if (!hasMod(u, 'adapt')) continue;
+    const count = {};
+    for (const e of g.battle.units) if (e.tm === 'e' && e.alive) count[e.el] = (count[e.el] ?? 0) + 1;
+    const top = Object.keys(count).sort((a, b) => count[b] - count[a])[0];
+    const want = ELEMENT_KEYS.find((k) => ELEMENTS[k].beats === top);
+    if (want && u.el !== want) {
+      u.el = want;
+      log(g, `${u.n} 的適應塗層重組為${ELEMENTS[want].n}。`);
+    }
+  }
+
   g.flags.weaken = 0; // 一次性 debuff，用掉就清
   g.screen = 'battle';
   g.stats.battles++;
@@ -485,6 +521,9 @@ function adjacentCount(g, u, team) {
   )).length;
 }
 
+// 卡片給的「改寫規則」標記。跟詞條分開：詞條是天生的，卡片是這一局長出來的。
+export const hasMod = (u, id) => !!u?.mods?.[id];
+
 // 一次算完所有修正，並回傳每一項，這樣 UI 才能把「為什麼是這個數字」攤開給玩家看。
 // 戰鬥預測（聖火降魔錄真正的發明）靠的就是這個函式。
 //
@@ -535,6 +574,8 @@ export function damageBreakdown(g, attacker, target, skillMult = 1) {
   // 其餘詞條走乘算
   let traitMult = 1;
   const mul = (id, m) => { traitMult *= m; note(id, m); };
+  // 卡片來的修正沒有 TRAITS 條目，所以另外一個不查表的版本
+  const mul2 = (label, m) => { traitMult *= m; traitMods.push({ n: label, m, good: 1 }); };
   if (hasTrait(attacker, 'finisher') && target.hp <= target.mhp / 2) {
     mul('finisher', 1 + traitV(attacker, 'finisher'));
   }
@@ -555,6 +596,21 @@ export function damageBreakdown(g, attacker, target, skillMult = 1) {
   }
   if (hasTrait(target, 'brittle') && elem > 1) {
     mul('brittle', 1 + traitV(target, 'brittle'));
+  }
+  // 協防裝置：相鄰有帶這張卡的隊友時減傷（那名隊友自己分擔 1 點，見 attackUnit）
+  let guarded = null;
+  if (target.tm === 'p') {
+    guarded = battleUnits(g).find((o) => (
+      o.alive && o.tm === 'p' && o.id !== target.id && hasMod(o, 'guard')
+      && dist(o.x, o.y, target.x, target.y) === 1
+    )) || null;
+    if (guarded) traitMods.push({ n: '協防裝置', m: -2, good: 1 });
+  }
+  // 蓄能：整個回合沒出手，下一刀更重
+  if (hasMod(attacker, 'momentum') && attacker.charged) mul2('蓄能', 1.6);
+  // 伏擊姿態：掩體原本只有防守價值，這張卡讓它變成攻守兩用的取捨
+  if (hasMod(attacker, 'ambush') && g.battle?.cover.has(key(attacker.x, attacker.y))) {
+    mul2('伏擊姿態', 1.3);
   }
 
   // 狀態效果與技能倍率也走同一條乘算鏈，並且一樣要進 traitMods ——
@@ -579,7 +635,7 @@ export function damageBreakdown(g, attacker, target, skillMult = 1) {
 
   // 穩定性越高，區間越窄。stab 100 = 完全確定，stab 0 = 上下浮動 45%
   const stab = Math.max(0, Math.min(100, attacker.stab ?? 60));
-  const spread = TUNE.BASE_SPREAD * (1 - stab / 100);
+  const spread = TUNE.BASE_SPREAD * (1 - stab / 100) * (CONDITION_BY_ID[g.battle?.cond]?.spreadMult ?? 1);
   // 精算與故障頻傳是「單邊收窄」：一個把下緣往上拉、一個把上緣往下壓。
   // 這跟「穩定性」不同 —— 穩定性是兩邊一起收，期望值不變；
   // 這兩個會實際改變期望值，所以是有份量的詞條而不是換句話說。
@@ -607,6 +663,7 @@ export function damageBreakdown(g, attacker, target, skillMult = 1) {
     flankLabel: flank.label,
     traitMods,
     spread,
+    guardedBy: guarded ? guarded.id : null,
     guaranteedKill: min >= target.hp,
     possibleKill: max >= target.hp,
   };
@@ -745,6 +802,37 @@ export function attackUnit(g, attacker, target, opts = {}) {
     }
   }
 
+  // 協防裝置：減下來的傷害由那名隊友吃掉。純減傷會讓卡片沒有代價，
+  // 有轉嫁才是「陣型」而不是「數值」。
+  if (!opts.free && !opts.noEcho && roll.guardedBy) {
+    const gm = unitById(g, roll.guardedBy);
+    if (gm?.alive) {
+      gm.hp -= 1;
+      gm.hurtMs = 200;
+      log(g, `${gm.n} 以協防裝置替 ${target.n} 分擔 1 點傷害。`);
+      if (gm.hp <= 0) { gm.hp = 0; gm.alive = 0; g.battle.downed.push(gm.id); log(g, `${gm.n} 被擊破。`, true); }
+    }
+  }
+
+  // 反擊模組：被近戰打到就還手一次。標 noEcho 免得兩邊互相反擊反擊到天亮。
+  if (!opts.noEcho && target.alive && hasMod(target, 'riposte')
+      && dist(attacker.x, attacker.y, target.x, target.y) <= Math.max(1, target.rg)) {
+    log(g, `${target.n} 的反擊模組啟動。`);
+    attackUnit(g, target, attacker, { free: 1, noEcho: 1, mult: 0.6, label: '反擊' });
+  }
+
+  // 連鎖擊發：擊破後立刻打相鄰的下一個，一樣不觸發二次連鎖
+  if (killed && !opts.noEcho && hasMod(attacker, 'chain') && attacker.alive) {
+    const next = battleUnits(g).find((o) => (
+      o.alive && o.tm !== attacker.tm && o.id !== target.id
+      && dist(attacker.x, attacker.y, o.x, o.y) <= attacker.rg
+    ));
+    if (next) {
+      log(g, `${attacker.n} 連鎖擊發。`);
+      attackUnit(g, attacker, next, { free: 1, noEcho: 1, mult: 0.7, label: '連鎖擊發' });
+    }
+  }
+
   checkBattleEnd(g);
   if (attacker.tm === 'p' && g.battle?.phase === 'player') autoSelectNext(g, attacker);
   return { ok: true, dmg, killed };
@@ -862,7 +950,8 @@ function onEnemyKilled(g, killer, victim) {
 // ---------------------------------------------------------------- 抽卡
 
 function draftSize(g) {
-  return TUNE.DRAFT_SIZE + (metaLevel(g.meta, 'draft') >= 1 ? 1 : 0);
+  const base = depthOf(g.depth).draftSize ?? TUNE.DRAFT_SIZE;
+  return base + (metaLevel(g.meta, 'draft') >= 1 ? 1 : 0);
 }
 
 function cardPoolFor(g, u) {
@@ -994,6 +1083,12 @@ export function applyCard(g, u, id) {
     case 'stab': u.stab = Math.min(98, u.stab + 12); break;
     case 'cool': u.cool = (u.cool || 0) + 1; break;
     case 'ul': { const n = nextTreeNode(u); if (n) unlockNode(g, u, n.lv); break; }
+    // 改寫規則的卡不動數值，只在單位身上留一個標記，由各自的 hook 讀。
+    case 'riposte': case 'guard': case 'chain': case 'ambush':
+    case 'adapt': case 'momentum':
+      u.mods = u.mods || {};
+      u.mods[id] = 1;
+      break;
     default: break;
   }
 }
@@ -1211,6 +1306,8 @@ export function endPlayerTurn(g) {
   const b = g.battle;
   if (!b || b.phase !== 'player') return false;
   if (g.pending.draft) return false;
+  // 蓄能要判斷「整個回合沒出手」，所以在交棒前把它記下來
+  for (const u of battleUnits(g)) if (u.tm === 'p') u.restedLast = u.attacked ? 0 : 1;
   b.phase = 'ai';
   b.selectedId = null;
   b.aiQueue = aliveOf(g, 'e').map((u) => u.id);
@@ -1285,29 +1382,68 @@ function bestMove(g, u, targets) {
   return best;
 }
 
-// 一個敵方單位的完整行動：先走位，再打一發（攻擊每回合限一次）
-function actEnemy(g, u) {
-  let living = aliveOf(g, 'p');
-  if (!living.length) return;
+// 一個敵方單位的完整行動：先走位，再打一發（攻擊每回合限一次）。
+//
+// ⚠️ 預測與執行必須共用這一個函式（dry=true 只算不做，借位後一定還原）。
+// 分成兩份寫的話，只要哪天改了 AI，畫面上顯示的意圖就會跟實際行動對不上 ——
+// 而「顯示的意圖是騙人的」比完全不顯示更糟，因為玩家會照著它做決策。
+export function planEnemy(g, u, dry = false) {
+  const living = aliveOf(g, 'p');
+  if (!living.length || !u.alive) return null;
 
-  let target = bestTarget(g, u, living);
-  const canShootFromHere = target && dist(u.x, u.y, target.x, target.y) <= u.rg;
+  const target0 = bestTarget(g, u, living);
+  const canShootFromHere = target0 && dist(u.x, u.y, target0.x, target0.y) <= u.rg;
+  const move = (!canShootFromHere && u.ap > 0) ? bestMove(g, u, living) : null;
+  const willMove = !!(move && move.cost <= u.ap);
 
-  if (!canShootFromHere && u.ap > 0) {
-    const move = bestMove(g, u, living);
-    if (move && move.cost <= u.ap) moveUnit(g, u, move.x, move.y);
-    living = aliveOf(g, 'p');
+  // 走位之後才知道打得到誰，所以借位算完再還原
+  let target = target0;
+  let dmg = null;
+  if (willMove) {
+    const ox = u.x; const oy = u.y; const ofx = u.faceX; const ofy = u.faceY;
+    u.x = move.x; u.y = move.y;
     target = bestTarget(g, u, living);
+    if (target) faceToward(u, target.x, target.y);
+    if (target && dist(u.x, u.y, target.x, target.y) <= u.rg) dmg = damageBreakdown(g, u, target);
+    u.x = ox; u.y = oy; u.faceX = ofx; u.faceY = ofy;
+  } else if (target && dist(u.x, u.y, target.x, target.y) <= u.rg) {
+    dmg = damageBreakdown(g, u, target);
   }
 
-  // 被電磁干擾的單位這一回合不能開火（但還是會走位，不然玩家看不出它被癱瘓了）
-  if (target && u.alive && !u.attacked && u.ap >= 1
-      && !hasStatus(u, 'stunned') && dist(u.x, u.y, target.x, target.y) <= u.rg) {
-    attackUnit(g, u, target);
-  } else if (hasStatus(u, 'stunned')) {
+  const stunned = hasStatus(u, 'stunned');
+  const willAttack = !!(target && !u.attacked && u.ap >= 1 && !stunned && dmg);
+
+  const plan = {
+    unitId: u.id,
+    move: willMove ? { x: move.x, y: move.y } : null,
+    targetId: willAttack ? target.id : null,
+    min: willAttack ? dmg.min : 0,
+    max: willAttack ? dmg.max : 0,
+    kills: willAttack ? dmg.min >= target.hp : false,
+    stunned,
+    kind: stunned ? 'stunned' : willAttack ? 'attack' : willMove ? 'move' : 'wait',
+  };
+  if (dry) return plan;
+
+  // 真的執行。走位後要重新算目標，因為場上可能已經變了。
+  if (willMove) moveUnit(g, u, move.x, move.y);
+  const now = bestTarget(g, u, aliveOf(g, 'p'));
+  if (now && u.alive && !u.attacked && u.ap >= 1
+      && !stunned && dist(u.x, u.y, now.x, now.y) <= u.rg) {
+    attackUnit(g, u, now);
+  } else if (stunned) {
     log(g, `${u.n} 受到干擾，無法開火。`);
   }
   u.ap = 0; // 一回合只行動一次
+  return plan;
+}
+
+function actEnemy(g, u) { planEnemy(g, u, false); }
+
+// 給渲染層：我方回合時，場上每一隻敵人打算做什麼。
+export function enemyIntents(g) {
+  if (!g.battle || g.battle.phase !== 'player') return [];
+  return aliveOf(g, 'e').map((u) => planEnemy(g, u, true)).filter(Boolean);
 }
 
 // 執行「一個敵方單位的完整行動」。回傳 true 代表還有敵人沒動完。
@@ -1349,8 +1485,9 @@ function beginPlayerTurn(g) {
   g.stats.turns++;
 
   // 回合上限：防止龜縮打消耗，也擋掉雙方互相搆不到造成的死局
-  if (b.turn > TUNE.TURN_LIMIT) {
-    log(g, `超過 ${TUNE.TURN_LIMIT} 回合仍未肅清，撤退訊號發出。`, true);
+  const limit = CONDITION_BY_ID[b.cond]?.turnLimit ?? TUNE.TURN_LIMIT;
+  if (b.turn > limit) {
+    log(g, `超過 ${limit} 回合仍未肅清，撤退訊號發出。`, true);
     b.phase = 'lose';
     onBattleLose(g);
     return;
@@ -1387,8 +1524,23 @@ function beginPlayerTurn(g) {
       log(g, `${u.n} 的內傷惡化 −${amt} HP。`);
     }
   }
+  // 蓄能：這一回合開始時清帳，上一回合有沒有出手在 endPlayerTurn 記。
+  for (const u of battleUnits(g)) if (hasMod(u, 'momentum')) u.charged = u.restedLast ? 1 : 0;
+
+  // 敵方增援：講好第幾回合就第幾回合，玩家看得到倒數才叫條件不叫陷阱
+  const surge = CONDITION_BY_ID[b.cond]?.surgeTurn;
+  if (surge && b.turn === surge && !b.surged) {
+    b.surged = 1;
+    const node = g.map.nodes[b.nodeId];
+    const pool = ENEMY_ARCHETYPES.filter((a) => a.tier === 1);
+    const add = makeEnemy(g, g.rng.weighted(pool), scaleFor(node), b.units.filter((u) => u.tm === 'e').length);
+    b.units.push(add);
+    log(g, `敵方增援抵達：${add.n}。`, true);
+    fx(g, { type: 'burst', x: add.x, y: add.y, color: '#ff8b7d', life: 420, size: 1.8 });
+  }
+
   b.selectedId = aliveOf(g, 'p')[0]?.id ?? null;
-  if (b.turn === TUNE.TURN_LIMIT - 5) log(g, `警告：剩下 5 個回合就會被迫撤退。`, true);
+  if (b.turn === limit - 5) log(g, `警告：剩下 5 個回合就會被迫撤退。`, true);
   log(g, `第 ${b.turn} 回合，我方行動。`, true);
 }
 
@@ -1413,7 +1565,8 @@ function onBattleWin(g) {
   g.credits += gain;
 
   // 戰後自動修復一小段，補給節點負責大回復
-  const healPct = node.type === 'elite' ? TUNE.WIN_HEAL_PCT * 1.5 : TUNE.WIN_HEAL_PCT;
+  const baseHeal = depthOf(g.depth).healPct ?? TUNE.WIN_HEAL_PCT;
+  const healPct = node.type === 'elite' ? baseHeal * 1.5 : baseHeal;
   const healed = [];
   for (const u of aliveOf(g, 'p')) {
     const before = u.hp;
@@ -1610,15 +1763,17 @@ function onBattleLose(g) {
 }
 
 export function finishRun(g, won) {
-  const cores = coresEarned({
+  const D = depthOf(g.depth);
+  const cores = Math.round(D.bonus * coresEarned({
     depth: g.stats.depth,
     kills: g.stats.kills,
     eliteKills: g.stats.eliteKills,
     won,
-  });
+  }));
   g.result = {
     won,
     cores,
+    depthLv: g.depth,
     depth: g.stats.depth,
     kills: g.stats.kills,
     eliteKills: g.stats.eliteKills,

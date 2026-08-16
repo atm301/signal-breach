@@ -1,6 +1,6 @@
 // 跨 run 的永久進度。唯一會碰 localStorage 的檔案，storage 可注入方便測試。
 
-import { META_UPGRADES, META_BY_ID } from './data.js';
+import { META_UPGRADES, META_BY_ID, MAX_DEPTH } from './data.js';
 
 const STORAGE_KEY = 'sft_meta_v1';
 
@@ -10,6 +10,10 @@ export function emptyMeta() {
     cores: 0,
     upgrades: {},
     stats: { runs: 0, wins: 0, bestDepth: 0, totalKills: 0, totalCores: 0 },
+    // 已解鎖到第幾級威脅（通關才會 +1）與「現在要打第幾級」。
+    // 這兩個一定要分開存：合成一個的話，玩家挑回低威脅練功就等於把解鎖進度洗掉。
+    depthMax: 0,
+    depth: 0,
     // 教學預設開著：全新玩家的 runs 是 0。
     // 老玩家的舊存檔沒有這個欄位，由 tutorial.js 的 tutorialOf() 依 runs 補上，
     // 所以已經玩過的人不會突然被塞一堆提示。
@@ -39,6 +43,8 @@ export function loadMeta(storage) {
       ...parsed,
       upgrades: { ...base.upgrades, ...(parsed.upgrades || {}) },
       stats: { ...base.stats, ...(parsed.stats || {}) },
+      depthMax: Math.max(0, Math.min(MAX_DEPTH, parsed.depthMax ?? 0)),
+      depth: Math.max(0, Math.min(MAX_DEPTH, parsed.depth ?? 0)),
       // 舊存檔沒有 tutorial 欄位時留成 undefined，讓 tutorialOf() 依 runs 決定 ——
       // 在這裡直接填 base 的 { on: true } 會害老玩家讀檔後被塞滿提示
       tutorial: parsed.tutorial,
@@ -92,6 +98,11 @@ export function recordRun(meta, result) {
   meta.stats.bestDepth = Math.max(meta.stats.bestDepth, result.depth);
   meta.stats.totalKills += result.kills;
   meta.stats.totalCores += result.cores;
+  // 只有真的通關才解鎖下一級。打到一半陣亡不算 —— 不然「進去送死」就是解鎖捷徑。
+  if (result.won) {
+    const lv = result.depthLv ?? 0;
+    if (lv >= (meta.depthMax ?? 0)) meta.depthMax = Math.min(MAX_DEPTH, lv + 1);
+  }
   return meta;
 }
 
@@ -108,6 +119,12 @@ export function resetMeta(storage) {
   const s = safeStorage(storage);
   if (s) { try { s.removeItem(STORAGE_KEY); } catch { /* 忽略 */ } }
   return emptyMeta();
+}
+
+// 選擇威脅等級。超過已解鎖的就夾回去，UI 壞掉也不會讓人跳級。
+export function setDepth(meta, lv) {
+  meta.depth = Math.max(0, Math.min(meta.depthMax ?? 0, lv | 0));
+  return meta.depth;
 }
 
 export { STORAGE_KEY };

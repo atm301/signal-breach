@@ -40,6 +40,9 @@ export const TUNE = {
   // 相剋與側背讓玩家的期望傷害大幅上升（最高 1.35 x 1.45 = 1.96 倍），
   // 敵人血量要跟上，否則戰鬥會縮回 3 回合以下、通關率飆到 76%。
   ENEMY_HP_MULT: 1.63,
+  // 「戰鬥要夠長」跟「戰鬥要夠痛」是兩件事，需要兩個旋鈕。
+  // 只有血量的話：拉高會同時拉長戰鬥與壓垮新手，永遠只能二選一。
+  ENEMY_ATK_MULT: 0.78,
 
   // ── 隨機幹員 ──────────────────────────────────────────
   RECRUIT_POOL: 5, // 每次出擊抽這麼多名候補
@@ -351,9 +354,100 @@ export const CARDS = [
   { id: 'stab', w: 22, r: RARITY.RARE, n: '陀螺穩定器', d: '穩定性 +12（傷害更集中）', price: 80 },
   { id: 'cool', w: 8, r: RARITY.EPIC, n: '散熱超載', d: '所有技能冷卻 −1（最低 1）', price: 140 },
   { id: 'sp2', w: 6, r: RARITY.EPIC, n: '深度簡報', d: '技能點 +2', price: 150 },
+
+  // ── 會改變玩法的卡 ──────────────────────────────────────
+  // 上面九張全是數值卡：抽到什麼都只是「變強一點」，不會變成
+  // 「這局我要換個打法」。下面這些每一張都改寫一條規則，
+  // 而且各自掛在不同的 hook 上，所以會互相組合出不同玩法。
+  { id: 'riposte', w: 16, r: RARITY.RARE, n: '反擊模組', d: '被近戰攻擊後自動還擊（60% 傷害）', price: 95, mod: 1 },
+  { id: 'guard', w: 16, r: RARITY.RARE, n: '協防裝置', d: '相鄰隊友受到的傷害 −2，改由自己承受 1', price: 95, mod: 1 },
+  { id: 'chain', w: 14, r: RARITY.RARE, n: '連鎖擊發', d: '擊破敵人後，立刻對相鄰目標追打一次（70% 傷害）', price: 100, mod: 1 },
+  { id: 'ambush', w: 12, r: RARITY.RARE, n: '伏擊姿態', d: '自己站在掩體上時，攻擊 +30%', price: 100, mod: 1 },
+  { id: 'adapt', w: 8, r: RARITY.EPIC, n: '適應塗層', d: '每場戰鬥開始時，屬性自動改成剋制場上最多敵人的那一系', price: 155, mod: 1 },
+  { id: 'momentum', w: 8, r: RARITY.EPIC, n: '蓄能', d: '整個回合沒有攻擊，下一次攻擊 +60%', price: 155, mod: 1 },
 ];
 
 export const CARD_BY_ID = Object.fromEntries(CARDS.map((c) => [c.id, c]));
+
+// ---------------------------------------------------------------- 威脅等級
+//
+// 通關之後的問題是「我贏了，然後呢」。原本打倒 Boss 跟死在 F3 走同一條路。
+// 每通關一次解鎖下一級，修正累積疊加，玩家自己選要不要挑戰。
+//
+// ⚠️ 梯子要有一根單調遞增的骨幹（hpMult），其他修正疊在上面當風味。
+// 共用同一個 hpMult 的話會出現「高一階反而比較簡單」。
+// 威脅等級：通關之後才存在的那一層。
+//
+// ⚠️ 這裡的 hpMult 是整條階梯的骨幹，必須單調遞增。
+// 只靠「抽卡少一張、狀況必定出現」這種風味修正做不出難度階梯 ——
+// 實測過：那些修正的效果會被隨機性吃掉，第 2 級反而比第 1 級好打。
+//
+// 增幅刻意做得比同引擎的另一款小：Signal Breach 的基礎難度本來就高，
+// 同樣的倍率乘上去會直接把上面幾級變成 0% 的裝飾品。
+export const DEPTHS = [
+  { lv: 0, n: '標準', d: '沒有額外修正。', bonus: 1.0 },
+  { lv: 1, n: '威脅 I', bonus: 1.15, hpMult: 1.04, d: '敵人 HP +4%。' },
+  {
+    lv: 2, n: '威脅 II', bonus: 1.3, hpMult: 1.08, pool: 4, draftSize: 2,
+    d: '敵人 HP +8%。徵召名單少一人，升級抽卡只給兩張。',
+  },
+  {
+    lv: 3, n: '威脅 III', bonus: 1.5, hpMult: 1.12, pool: 4, draftSize: 2, alwaysCond: 1,
+    d: '敵人 HP +12%。每一場都必定有戰場狀況。',
+  },
+  {
+    lv: 4, n: '威脅 IV', bonus: 1.75, hpMult: 1.16, pool: 4, draftSize: 2, alwaysCond: 1, atkMult: 1.06,
+    d: '敵人 HP +16%、ATK +6%。',
+  },
+  {
+    lv: 5, n: '威脅 V', bonus: 2.0, hpMult: 1.20, pool: 4, draftSize: 2, alwaysCond: 1,
+    atkMult: 1.06, healPct: 0.15, bossCond: 1,
+    d: '敵人 HP +20%、ATK +6%。戰後自動修復砍半，頭目戰必定帶狀況。',
+  },
+];
+
+export const MAX_DEPTH = DEPTHS.length - 1;
+export const depthOf = (lv) => DEPTHS[Math.max(0, Math.min(MAX_DEPTH, lv | 0))];
+
+
+// ---------------------------------------------------------------- 戰場狀況
+//
+// 每一層抽一個。同一批敵人在不同狀況下是完全不同的問題 ——
+// 這比做新敵人便宜太多，而且逼玩家每場重新想。
+//
+// 三個約束：開打前就看得到、不能有「純粹更難」的、不能讓玩家無法應對。
+export const CONDITIONS = [
+  { id: 'clear', n: '無異常', d: '沒有特殊狀況。', w: 45, plain: 1 },
+  {
+    id: 'jam', n: '電子干擾', w: 14,
+    d: '雙方射程 −1（最低 1）。遠程失去距離優勢，貼身成為主戰場。',
+    onStart: (g) => { for (const u of g.battle.units) u.rg = Math.max(1, u.rg - 1); },
+  },
+  {
+    id: 'deadline', n: '撤離倒數', w: 12, turnLimit: 12,
+    d: '回合上限縮短為 12。拖不起，必須主動壓上去。',
+  },
+  {
+    id: 'debris', n: '殘骸密佈', w: 12, extraCover: 1,
+    d: '掩體加倍。遠程更安全，但也更難把人逼出來。',
+  },
+  {
+    id: 'surge', n: '敵方增援', w: 12, surgeTurn: 3,
+    d: '第 3 回合會有一名敵方增援進場。速戰速決，或準備接第二波。',
+  },
+  {
+    id: 'unstable', n: '大氣擾動', w: 10, spreadMult: 2,
+    d: '雙方傷害浮動加倍。穩定性高的單位這一場特別值錢。',
+  },
+  {
+    id: 'overclock', n: '反應爐超載', w: 10,
+    d: '雙方 Max AP +1。走位空間變大，繞背與集火都更容易。',
+    onStart: (g) => {
+      for (const u of g.battle.units) { u.map = Math.min(TUNE.AP_CAP, u.map + 1); u.ap = u.map; }
+    },
+  },
+];
+export const CONDITION_BY_ID = Object.fromEntries(CONDITIONS.map((c) => [c.id, c]));
 
 // ---------------------------------------------------------------- 掩體佈局
 

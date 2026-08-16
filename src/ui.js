@@ -1,10 +1,11 @@
 // DOM 面板層。用「重建 innerHTML + 事件委派」的方式，
 // 所以重繪不會弄丟 handler；靠 signature 比對避免每一幀都重建。
 
+import { CHANGELOG, VERSION } from './changelog.js';
 import {
   TREE, META_UPGRADES, NODE_TYPES, FLOORS, CREDITS, CREDITS_META, ELEMENTS, TUNE, TRAITS, traitV,
   SKILLS, PATH_NAMES, treeNodeInfo,
-} from './data.js';
+ DEPTHS, MAX_DEPTH,} from './data.js';
 import {
   availableNodes, squadAlive, xpToNext, unitById, actableUnits, damageBreakdown, dist,
   repairOptions, skillsOf, skillState, skillCd,
@@ -184,6 +185,32 @@ function topBar(g, meta, opts) {
     </div>`;
 }
 
+// 版本紀錄。預設只展開最新一版 —— 全部攤開的話開場畫面會變成一份文件，
+// 而回鍋玩家真正要的答案（「上次之後多了什麼」）就沉到下面去了。
+function changelogPanel(open) {
+  const list = CHANGELOG.map((r, i) => {
+    const show = open ? true : i === 0;
+    const body = show
+      ? `<ul class="cl-items">${r.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`
+      : '';
+    return `
+      <div class="item">
+        <div class="item-head">
+          <b>v${esc(r.v)}　${esc(r.t)}</b>
+          <span class="tag">${esc(r.d)}</span>
+        </div>
+        ${body}
+      </div>`;
+  }).join('');
+
+  return `
+    <section>
+      <h2>版本紀錄　<span class="tag">目前 v${esc(VERSION)}</span></h2>
+      ${list}
+      ${btn('changelog', open ? '只看最新一版' : `展開全部 ${CHANGELOG.length} 版`)}
+    </section>`;
+}
+
 // ---------------------------------------------------------------- 開場畫面
 
 function relTime(ts) {
@@ -242,6 +269,7 @@ function titlePanel(meta, opts) {
       ${resume}
     </section>
     ${veteran ? `<section><h2>戰績</h2>${veteran}<p class="hint">核心碎片 ${meta.cores}</p></section>` : ''}
+    ${changelogPanel(opts.changelogOpen)}
     <section>
       <h2>怎麼玩</h2>
       <p class="hint">
@@ -285,6 +313,32 @@ function creditsPanel() {
 
 // ---------------------------------------------------------------- 大廳
 
+// 威脅等級：通關之後才存在的那一層。
+//
+// 通關一次就結束的話，所有永久升級都變成一次性的 —— 買完就沒地方用。
+// 威脅等級讓那些碎片有去處：每高一級敵人更硬、抽卡更少、戰場狀況必定出現，
+// 但碎片收益也跟著翻倍。玩家自己決定要在哪一級久留。
+function threatPanel(meta) {
+  const maxLv = meta.depthMax ?? 0;
+  if (!maxLv) return ''; // 還沒通關過，這一整層不該存在
+
+  const cur = Math.min(maxLv, meta.depth ?? 0);
+  const opts = DEPTHS.slice(0, maxLv + 1).map((d) => `
+    <button class="depth${d.lv === cur ? ' on' : ''}" data-act="setDepth:${d.lv}">
+      <b>${esc(d.n)}</b><span>×${d.bonus.toFixed(2)}</span>
+    </button>`).join('');
+
+  const D = DEPTHS[cur];
+  return `
+    <section>
+      <h2>威脅等級</h2>
+      <p class="hint">已解鎖到 <b>${esc(DEPTHS[maxLv].n)}</b>${
+  maxLv >= MAX_DEPTH ? '（已達最高）' : '。通關目前等級即可解鎖下一級。'}</p>
+      <div class="depthrow">${opts}</div>
+      <p class="hint"><b>${esc(D.n)}</b>：${esc(D.d)}　碎片收益 ×${D.bonus.toFixed(2)}</p>
+    </section>`;
+}
+
 function hubPanel(g, meta) {
   const tut = tutorialProgress(meta);
   const list = upgradeList(meta).map((u) => {
@@ -303,6 +357,7 @@ function hubPanel(g, meta) {
 
   const s = meta.stats;
   return `
+    ${threatPanel(meta)}
     <section>
       <h2>作戰基地</h2>
       <p class="hint">每次出擊都會重新生成關卡樹與敵人配置。陣亡不會清空核心碎片，永久升級會留下來。</p>

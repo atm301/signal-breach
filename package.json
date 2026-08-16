@@ -1,6 +1,6 @@
 {
   "name": "signal-breach",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Signal Breach 訊號突破 — 5x5 科幻回合制戰棋 Roguelike（純前端，可靜態部署）",
   "type": "module",
   "private": true,

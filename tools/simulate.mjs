@@ -37,6 +37,7 @@ const META_MODE = args.meta ?? 'none';
 // 用來量「單一升級到底貢獻幾個百分點」——
 // 三個新升級一起加下去把通關率從 47% 推到 79%，不拆開量就只能亂猜是誰的問題。
 const DROP = String(args.drop ?? '').split(',').filter(Boolean);
+const DEPTH = Number(args.depth ?? 0); // 威脅等級：驗證階梯是不是單調變難
 
 function metaFor(mode) {
   const lvl = (u) => {
@@ -327,7 +328,7 @@ function botBattle(g) {
 // ---------------------------------------------------------------- 跑一場
 
 function playRun(seed, meta) {
-  const g = createGame({ seed, meta });
+  const g = createGame({ seed, meta, depth: DEPTH });
   let guard = 0;
 
   while (g.screen !== 'result' && guard++ < 600) {

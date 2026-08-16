@@ -291,3 +291,19 @@ button.big { padding: 15px; font-size: 16px; font-weight: 800; letter-spacing: 2
   .panel { max-height: none; }
   .statgrid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* 威脅等級選擇。橫排小卡而不是下拉選單 ——
+   每一級的碎片倍率要能一眼比較，藏在下拉裡就沒人會去點開比。 */
+.depthrow { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.depthrow button.depth {
+  width: auto; flex: 1 1 72px; padding: 6px 8px; line-height: 1.3;
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+}
+.depthrow button.depth b { font-size: 12px; }
+.depthrow button.depth span { font-size: 10px; color: var(--mut); }
+.depthrow button.depth.on { background: #5a2a1d; border-color: #d98a4a; }
+.depthrow button.depth.on span { color: #ffd6ad; }
+
+/* 版本紀錄 */
+.cl-items { margin: 6px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.75; color: var(--mut); }
+.cl-items li { margin-bottom: 2px; }

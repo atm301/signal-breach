@@ -8,8 +8,9 @@ import {
   buyShopItem, leaveShop, chooseSupply, closeSupply, setFocus, finishRun,
   serializeState, log, queueDraft, closeVictory,
   openRecruit, toggleRecruit, confirmRecruit, buyRepair, setDraftTarget, armSkill, cancelSkill,
+  enemyIntents,
 } from './engine.js';
-import { loadMeta, saveMeta, buyUpgrade, recordRun, resetMeta } from './meta.js';
+import { loadMeta, saveMeta, buyUpgrade, recordRun, resetMeta, setDepth } from './meta.js';
 import { nextTip, markSeen, setTutorial, resetTutorial, tutorialProgress } from './tutorial.js';
 import { loadAssets, assetCount } from './assets.js';
 import {
@@ -75,7 +76,7 @@ for (const ev of ['pointerdown', 'keydown', 'touchstart']) {
 // 如果在這裡清檔，等於每次重新載入頁面都會把存檔刪掉，讀檔永遠讀不到。
 // 清檔放在真正「開新出擊」的 action 裡。
 function newRun(seed) {
-  g = createGame({ seed, meta });
+  g = createGame({ seed, meta, depth: meta.depth ?? 0 });
   fxList = [];
   aiAcc = 0;
   resultRecorded = false;
@@ -111,6 +112,7 @@ function commitResult() {
 // ---------------------------------------------------------------- 存檔
 
 let titleSave = null;
+let changelogOpen = false; // 版本紀錄展不展開。純畫面狀態，不進存檔。
 let lastSaveSig = '';
 
 function refreshTitleSave() {
@@ -141,6 +143,7 @@ const actions = {
     g.screen = 'hub';
     ui.invalidate();
   },
+  changelog() { changelogOpen = !changelogOpen; ui.invalidate(); },
   credits() { g.screen = 'credits'; ui.invalidate(); },
   titleBack() { g.screen = 'title'; refreshTitleSave(); },
   resumeRun() {
@@ -171,6 +174,13 @@ const actions = {
     clearRun();
     newRun(value || undefined);
     openRecruit(g);
+  },
+
+  setDepth(lv) {
+    setDepth(meta, Number(lv));
+    saveMeta(meta);
+    playSfx('ui', 660);
+    ui.invalidate();
   },
 
   buy(id) {
@@ -393,7 +403,7 @@ function draw(time) {
   const size = canvasSize();
   if (g.screen === 'title' || g.screen === 'credits') {
     renderTitle(ctx, size, time, { mode: g.screen, audioStarted: audioState().started });
-  } else if ((g.screen === 'battle' || g.screen === 'victory') && g.battle) renderBattle(ctx, g, size, time, fxList, hoverTile);
+  } else if ((g.screen === 'battle' || g.screen === 'victory') && g.battle) renderBattle(ctx, g, size, time, fxList, hoverTile, enemyIntents(g));
   else if (g.screen === 'hub') renderIdle(ctx, g, size, '作戰基地');
   else if (g.screen === 'result') renderIdle(ctx, g, size, g.result?.won ? '出擊成功' : '出擊失敗');
   else renderMap(ctx, g, size, time, hoverNodeId);
@@ -410,6 +420,7 @@ function frame(now) {
     ...audioState(),
     track: currentTrack()?.name ?? null,
     save: g.screen === 'title' ? titleSave : null,
+    changelogOpen,
     tip: nextTip(g, meta),
   });
   hudRoot.innerHTML = hudHtml(g);

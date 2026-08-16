@@ -1,7 +1,7 @@
 // Canvas 繪製層。只讀 game state，不改它。
 // 戰鬥棋盤與關卡樹共用同一張 canvas，由 g.screen 決定畫哪一個。
 
-import { GRID, FLOORS, NODE_TYPES, ELEMENTS } from './data.js';
+import { GRID, FLOORS, NODE_TYPES, ELEMENTS, CONDITION_BY_ID } from './data.js';
 import {
   key, dist, reachableTiles, aliveOf, unitById, availableNodes, damageBreakdown,
   validSkillTiles,
@@ -144,7 +144,7 @@ export function pickMapNode(g, size, px, py) {
 
 // ---------------------------------------------------------------- 戰鬥棋盤
 
-export function renderBattle(ctx, g, size, time, fxList, hoverTile) {
+export function renderBattle(ctx, g, size, time, fxList, hoverTile, intents = []) {
   const board = size - PAD * 2;
   const cell = board / GRID;
 
@@ -158,13 +158,16 @@ export function renderBattle(ctx, g, size, time, fxList, hoverTile) {
   drawGrid(ctx, cell);
   drawCover(ctx, g, cell);
   drawHighlights(ctx, g, cell);
+  drawIntents(ctx, g, cell, time, intents);
   drawUnits(ctx, g, cell, time);
   drawFx(ctx, fxList, cell);
   drawForecast(ctx, g, cell, hoverTile);
 
   const b = g.battle;
   const typeLabel = b.nodeType === 'boss' ? '頭目戰' : b.nodeType === 'elite' ? '精英交戰' : '交火';
-  drawBanner(ctx, size, `F${b.floor} ${typeLabel} | 第 ${b.turn} 回合 | ${b.phase === 'player' ? '我方行動' : b.phase === 'ai' ? '敵方行動' : ''}`);
+  const cond = CONDITION_BY_ID[b.cond];
+  const condText = cond && !cond.plain ? ` | ⚠ ${cond.n}` : '';
+  drawBanner(ctx, size, `F${b.floor} ${typeLabel} | 第 ${b.turn} 回合 | ${b.phase === 'player' ? '我方行動' : b.phase === 'ai' ? '敵方行動' : ''}${condText}`, !!condText);
 
   if (b.phase === 'win') drawToast(ctx, size, b.nodeType === 'boss' ? '頭目擊破' : '區域肅清', '#a8f5c0');
   else if (g.pending.draft) drawToast(ctx, size, '升級改裝中');
@@ -818,11 +821,11 @@ export function pickBoardTile(size, px, py) {
 
 // ---------------------------------------------------------------- 共用零件
 
-function drawBanner(ctx, size, text) {
+function drawBanner(ctx, size, text, warn = false) {
   // 高度與位置要留給棋盤上方的座標標籤（畫在 y = PAD - 12），不然會疊在一起
-  ctx.fillStyle = 'rgba(14,26,34,.86)';
+  ctx.fillStyle = warn ? 'rgba(46,26,16,.9)' : 'rgba(14,26,34,.86)';
   ctx.fillRect(PAD * 0.4, 4, size - PAD * 0.8, 28);
-  ctx.fillStyle = '#dce9f0';
+  ctx.fillStyle = warn ? '#ffd6ad' : '#dce9f0';
   ctx.font = `13px ${FONT}`;
   ctx.textAlign = 'start';
   ctx.fillText(text, PAD * 0.4 + 12, 23);
@@ -927,4 +930,72 @@ export function renderIdle(ctx, g, size, title) {
   ctx.textAlign = 'center';
   ctx.fillText(title, size / 2, size * 0.48);
   ctx.textAlign = 'start';
+}
+
+// 敵方意圖：這一回合每隻敵人打算走去哪、打誰、打多重。
+//
+// 這是整個遊戲最重要的一層資訊。沒有它，戰棋就退化成「動完看誰運氣好」；
+// 有了它，每一步都是在回答「我要不要用這一格換那一刀」。
+function drawIntents(ctx, g, cell, time, intents) {
+  if (!intents?.length || g.battle?.phase !== 'player') return;
+  const pulse = 0.6 + Math.sin(time / 380) * 0.4;
+
+  for (const it of intents) {
+    const u = unitById(g, it.unitId);
+    if (!u?.alive) continue;
+    const from = { x: PAD + u.x * cell + cell * 0.5, y: PAD + u.y * cell + cell * 0.5 };
+
+    // 要移動：虛線到目的地，終點一個空心方框
+    if (it.move) {
+      const to = { x: PAD + it.move.x * cell + cell * 0.5, y: PAD + it.move.y * cell + cell * 0.5 };
+      ctx.save();
+      ctx.strokeStyle = `rgba(255,180,120,${0.30 + pulse * 0.2})`;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.strokeRect(to.x - cell * 0.30, to.y - cell * 0.30, cell * 0.6, cell * 0.6);
+      ctx.restore();
+      from.x = to.x; from.y = to.y; // 攻擊線從「移動之後的位置」畫起才誠實
+    }
+
+    if (it.kind !== 'attack') continue;
+    const t = unitById(g, it.targetId);
+    if (!t?.alive) continue;
+    const to = { x: PAD + t.x * cell + cell * 0.5, y: PAD + t.y * cell + cell * 0.5 };
+
+    // 會被打死的話整條線變紅加粗 —— 那是玩家最需要一眼看到的事
+    ctx.save();
+    ctx.strokeStyle = it.kills ? `rgba(255,70,90,${0.7 + pulse * 0.3})` : `rgba(255,150,115,${0.5 + pulse * 0.3})`;
+    ctx.lineWidth = it.kills ? 4 : 2.5;
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+
+    const label = it.min === it.max ? `${it.min}` : `${it.min}-${it.max}`;
+    const fs = Math.round(cell * 0.15);
+    ctx.font = `800 ${fs}px ${FONT}`;
+    const w = ctx.measureText(label).width + fs * 1.1;
+    const bx = Math.max(4, Math.min(PAD * 2 + GRID * cell - w - 4, to.x - w / 2));
+    // 最下排的目標，預告框會掉出棋盤 —— 掉出去就翻到單位上方。
+    const below = to.y + cell * 0.30;
+    const by = below + fs * 1.5 > PAD + GRID * cell ? to.y - cell * 0.30 - fs * 1.5 : below;
+    ctx.fillStyle = it.kills ? 'rgba(150,15,30,.95)' : 'rgba(60,30,20,.88)';
+    roundRect(ctx, bx, by, w, fs * 1.5, 4);
+    ctx.fill();
+    ctx.strokeStyle = it.kills ? '#ff4d6a' : 'rgba(255,160,130,.7)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.fillStyle = it.kills ? '#ffd7dd' : '#ffd2c0';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, to.x, by + fs * 0.78);
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+    ctx.restore();
+  }
 }
