@@ -71,12 +71,22 @@ const external = (u) => /googletagmanager|facebook|google-analytics/.test(u);
 const realFails = failed.filter((f) => !external(f));
 const realErrors = errors.filter((e) => !external(e));
 
-const ok = assets && assets.units === 33 && assets.props === 6 && screen === 'hub'
+// ⚠️ 這裡曾經寫死 units === 33 且 screen === 'hub'，
+// 後來加了第二組小隊素材、開場畫面又改成先進 title，
+// 於是這支從那天起就一直是紅的 —— 而紅的理由是假的。
+// 一支永遠紅的檢查等於沒有檢查，所以改成對 manifest 自己核對。
+const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets/manifest.json'), 'utf8'));
+const wantUnits = manifest.units.length;
+const wantProps = manifest.props.length;
+const assetsOk = assets && assets.units === wantUnits && assets.props === wantProps;
+const bootOk = screen === 'title' || screen === 'hub';
+
+const ok = assetsOk && bootOk
   && played.screen === 'battle' && realFails.length === 0 && realErrors.length === 0;
 
 console.log(`網址        ${target}`);
 console.log(`開場畫面    ${screen}`);
-console.log(`素材        units=${assets?.units} props=${assets?.props}`);
+console.log(`素材        units=${assets?.units}/${wantUnits} props=${assets?.props}/${wantProps}${assetsOk ? '' : '  ← 與 manifest 對不上'}`);
 console.log(`實際遊玩    進入戰鬥=${played.screen === 'battle'} 場上單位=${played.units}`);
 console.log(`失敗請求    ${realFails.length ? realFails.join('\n            ') : '無'}`);
 console.log(`console錯誤 ${realErrors.length ? realErrors.join('\n            ') : '無'}`);
