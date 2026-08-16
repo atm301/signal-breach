@@ -209,6 +209,86 @@
       "prompt": "A square 1:1 background plate: an abandoned battlefield at dusk seen from a high three-quarter angle. A wrecked matte gunmetal combat walker lies half collapsed on cracked concrete, one leg buckled, armour plating scorched and split, a single cyan indicator still faintly blinking. Scattered debris, spent shell casings and a torn unit banner half buried in dust. Cold blue-grey light, thin haze, no fire and no bright embers. The centre of the frame is open empty ground in shadow, low contrast and uncluttered. Silent and still. No people visible.",
       "image": "items/idle-lose.png",
       "generated_at": "2026-08-16T21:45:52.374Z"
+    },
+    {
+      "id": "sheet-badges-1",
+      "name": "徽章 起步 4 枚",
+      "rows": 2,
+      "cols": 2,
+      "cells": [
+        [
+          "first-blood",
+          "first-clear"
+        ],
+        [
+          "first-loss",
+          "tinkerer"
+        ]
+      ],
+      "style_override": "Style: stamped military unit insignia for a hard science-fiction tactics game — issued equipment, not fantasy heraldry. Each emblem is a circular metal badge seen perfectly flat straight-on, no perspective, no tilt. Palette strictly gunmetal grey #3A4750, worn steel #6B7B8C, olive drab #5A6650, muted brass #A8895A and cold cyan #5DB6FF used sparingly as a single indicator accent. ⚠️ NO pink, NO magenta, NO crimson, NO red in any emblem — reserved for the cutout background. ⚠️ FORBIDDEN motifs: swords, crested shields, skulls, dragons, crowns, treasure chests, wands, trophies, keys, hearts, flames, hourglasses, wings. Use only flat geometric and technical shapes: arrows, chevrons, rings, bars, triangles, reticles, circuits, stencilled marks. Bold heavy stamped strokes, large simple shapes, readable at 64 pixels AND readable in pure greyscale — the meaning must live in the SHAPE, never the colour. Slight paint wear and scuffing on the metal is fine. No hairlines, no fine detail, no soft drop shadow, no glow. Background MUST be one flat uniform pure magenta #FF00FF field with nothing else on it: no gradient, no vignette, no shadow falling onto the magenta, no glow bleeding onto it. Badges fully separated by empty magenta space. No text, no letters, no numbers, no roman numerals, no tally marks, no watermark.",
+      "prompt": "A square 1:1 asset sheet with exactly 4 circular stamped metal unit badges in a clean 2 by 2 grid, 2 rows and 2 columns, with wide flat magenta gaps between them. No badge touches another. All 4 are the same diameter, each centred in its own invisible cell. Every badge is a plain circular disc with a plain narrow raised rim, carrying ONE bold stamped geometric emblem in the centre. Reading left to right, top row first, the four emblems are: 1 a power-on symbol: a thick broken ring with a vertical bar rising through the gap at its top. 2 a thick closed circular ring with a bold check mark inside it. 3 a wide rectangular drawer seen head-on with a thick arrow pointing down into it. 4 two crossed spanners laid over a single cog wheel.",
+      "image": "items/sheet-badges-1.png",
+      "generated_at": "2026-08-16T23:42:10.495Z"
+    },
+    {
+      "id": "sheet-badges-2",
+      "name": "徽章 準則 4 枚",
+      "rows": 2,
+      "cols": 2,
+      "cells": [
+        [
+          "doc-blitz",
+          "doc-phalanx"
+        ],
+        [
+          "doc-overwatch",
+          "doc-resonance"
+        ]
+      ],
+      "style_override": "Style: stamped military unit insignia for a hard science-fiction tactics game — issued equipment, not fantasy heraldry. Each emblem is a circular metal badge seen perfectly flat straight-on, no perspective, no tilt. Palette strictly gunmetal grey #3A4750, worn steel #6B7B8C, olive drab #5A6650, muted brass #A8895A and cold cyan #5DB6FF used sparingly as a single indicator accent. ⚠️ NO pink, NO magenta, NO crimson, NO red in any emblem — reserved for the cutout background. ⚠️ FORBIDDEN motifs: swords, crested shields, skulls, dragons, crowns, treasure chests, wands, trophies, keys, hearts, flames, hourglasses, wings. Use only flat geometric and technical shapes: arrows, chevrons, rings, bars, triangles, reticles, circuits, stencilled marks. Bold heavy stamped strokes, large simple shapes, readable at 64 pixels AND readable in pure greyscale — the meaning must live in the SHAPE, never the colour. Slight paint wear and scuffing on the metal is fine. No hairlines, no fine detail, no soft drop shadow, no glow. Background MUST be one flat uniform pure magenta #FF00FF field with nothing else on it: no gradient, no vignette, no shadow falling onto the magenta, no glow bleeding onto it. Badges fully separated by empty magenta space. No text, no letters, no numbers, no roman numerals, no tally marks, no watermark.",
+      "prompt": "A square 1:1 asset sheet with exactly 4 circular stamped metal unit badges in a clean 2 by 2 grid, 2 rows and 2 columns, with wide flat magenta gaps between them. No badge touches another. All 4 are the same diameter, each centred in its own invisible cell. Every badge is a plain circular disc with a rim of small repeated square notches, carrying ONE bold stamped geometric emblem in the centre. Reading left to right, top row first, the four emblems are: 1 one thick chevron arrow pointing right with three short speed streaks trailing behind it. 2 three filled circles placed at the corners of a triangle, joined by three thick straight bars. 3 a crosshair reticle: a thin circle crossed by two lines, with four tick marks radiating outward. 4 three concentric expanding rings, the outermost thickest, like a radar pulse.",
+      "image": "items/sheet-badges-2.png",
+      "generated_at": "2026-08-16T23:43:59.541Z"
+    },
+    {
+      "id": "sheet-badges-3",
+      "name": "徽章 精通 4 枚",
+      "rows": 2,
+      "cols": 2,
+      "cells": [
+        [
+          "all-doctrines",
+          "devotion"
+        ],
+        [
+          "depth3",
+          "depth5"
+        ]
+      ],
+      "style_override": "Style: stamped military unit insignia for a hard science-fiction tactics game — issued equipment, not fantasy heraldry. Each emblem is a circular metal badge seen perfectly flat straight-on, no perspective, no tilt. Palette strictly gunmetal grey #3A4750, worn steel #6B7B8C, olive drab #5A6650, muted brass #A8895A and cold cyan #5DB6FF used sparingly as a single indicator accent. ⚠️ NO pink, NO magenta, NO crimson, NO red in any emblem — reserved for the cutout background. ⚠️ FORBIDDEN motifs: swords, crested shields, skulls, dragons, crowns, treasure chests, wands, trophies, keys, hearts, flames, hourglasses, wings. Use only flat geometric and technical shapes: arrows, chevrons, rings, bars, triangles, reticles, circuits, stencilled marks. Bold heavy stamped strokes, large simple shapes, readable at 64 pixels AND readable in pure greyscale — the meaning must live in the SHAPE, never the colour. Slight paint wear and scuffing on the metal is fine. No hairlines, no fine detail, no soft drop shadow, no glow. Background MUST be one flat uniform pure magenta #FF00FF field with nothing else on it: no gradient, no vignette, no shadow falling onto the magenta, no glow bleeding onto it. Badges fully separated by empty magenta space. No text, no letters, no numbers, no roman numerals, no tally marks, no watermark.",
+      "prompt": "A square 1:1 asset sheet with exactly 4 circular stamped metal unit badges in a clean 2 by 2 grid, 2 rows and 2 columns, with wide flat magenta gaps between them. No badge touches another. All 4 are the same diameter, each centred in its own invisible cell. Every badge is a plain circular disc with a laurel wreath forming the rim, carrying ONE bold stamped geometric emblem in the centre. Reading left to right, top row first, the four emblems are: 1 four thick straight paths entering from top, bottom, left and right, converging into one filled circle at the exact centre. 2 one thick straight vertical bar passing through the middle of three stacked rings, skewering them. 3 three downward-pointing solid triangles stacked vertically, each smaller than the one above. 4 one large downward-pointing solid triangle whose tip rests on a thick horizontal baseline bar.",
+      "image": "items/sheet-badges-3.png",
+      "generated_at": "2026-08-16T23:45:43.970Z"
+    },
+    {
+      "id": "sheet-badges-4",
+      "name": "徽章 技巧 4 枚",
+      "rows": 2,
+      "cols": 2,
+      "cells": [
+        [
+          "flawless",
+          "swift"
+        ],
+        [
+          "maxed",
+          "centurion"
+        ]
+      ],
+      "style_override": "Style: stamped military unit insignia for a hard science-fiction tactics game — issued equipment, not fantasy heraldry. Each emblem is a circular metal badge seen perfectly flat straight-on, no perspective, no tilt. Palette strictly gunmetal grey #3A4750, worn steel #6B7B8C, olive drab #5A6650, muted brass #A8895A and cold cyan #5DB6FF used sparingly as a single indicator accent. ⚠️ NO pink, NO magenta, NO crimson, NO red in any emblem — reserved for the cutout background. ⚠️ FORBIDDEN motifs: swords, crested shields, skulls, dragons, crowns, treasure chests, wands, trophies, keys, hearts, flames, hourglasses, wings. Use only flat geometric and technical shapes: arrows, chevrons, rings, bars, triangles, reticles, circuits, stencilled marks. Bold heavy stamped strokes, large simple shapes, readable at 64 pixels AND readable in pure greyscale — the meaning must live in the SHAPE, never the colour. Slight paint wear and scuffing on the metal is fine. No hairlines, no fine detail, no soft drop shadow, no glow. Background MUST be one flat uniform pure magenta #FF00FF field with nothing else on it: no gradient, no vignette, no shadow falling onto the magenta, no glow bleeding onto it. Badges fully separated by empty magenta space. No text, no letters, no numbers, no roman numerals, no tally marks, no watermark.",
+      "prompt": "A square 1:1 asset sheet with exactly 4 circular stamped metal unit badges in a clean 2 by 2 grid, 2 rows and 2 columns, with wide flat magenta gaps between them. No badge touches another. All 4 are the same diameter, each centred in its own invisible cell. Every badge is a plain circular disc with a rim of short radiating spikes, carrying ONE bold stamped geometric emblem in the centre. Reading left to right, top row first, the four emblems are: 1 a plain solid heater-shaped plate, completely unbroken and smooth, with no crest or decoration. 2 a bold zigzag bolt cutting diagonally across two parallel horizontal bars. 3 a wide rectangular battery outline completely filled with three solid blocks. 4 a closed laurel wreath encircling one large solid filled disc.",
+      "image": "items/sheet-badges-4.png",
+      "generated_at": "2026-08-16T23:47:52.371Z"
     }
   ]
 }

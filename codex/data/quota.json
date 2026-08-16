@@ -102,7 +102,7 @@
   ],
   "today": {
     "date": "2026-08-17",
-    "generated": 3,
+    "generated": 7,
     "limit": 20,
     "sessions": [
       {
@@ -128,6 +128,38 @@
         "elapsed_seconds": 49.3,
         "codex_session": "01a00c89-14ab-7a31-9dad-69a07c5b8061",
         "image": "items/idle-lose.png"
+      },
+      {
+        "id": "sheet-badges-1",
+        "kind": "item",
+        "timestamp": "2026-08-16T23:42:10.496Z",
+        "elapsed_seconds": 84.5,
+        "codex_session": "01a00cf3-1aa9-7000-93e1-fc8beb0c91a0",
+        "image": "items/sheet-badges-1.png"
+      },
+      {
+        "id": "sheet-badges-2",
+        "kind": "item",
+        "timestamp": "2026-08-16T23:43:59.542Z",
+        "elapsed_seconds": 73.8,
+        "codex_session": "01a00cf4-e1b0-7843-a948-677d7a4f5bfb",
+        "image": "items/sheet-badges-2.png"
+      },
+      {
+        "id": "sheet-badges-3",
+        "kind": "item",
+        "timestamp": "2026-08-16T23:45:43.971Z",
+        "elapsed_seconds": 69.2,
+        "codex_session": "01a00cf6-8347-7b42-b9ab-98317a37c7b0",
+        "image": "items/sheet-badges-3.png"
+      },
+      {
+        "id": "sheet-badges-4",
+        "kind": "item",
+        "timestamp": "2026-08-16T23:47:52.372Z",
+        "elapsed_seconds": 93.1,
+        "codex_session": "01a00cf8-2245-73c1-ace8-b14e9df3486f",
+        "image": "items/sheet-badges-4.png"
       }
     ]
   }

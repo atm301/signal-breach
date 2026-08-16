@@ -69,5 +69,23 @@
     "idle-win",
     "panel-backdrop",
     "title-bg"
+  ],
+  "badges": [
+    "all-doctrines",
+    "centurion",
+    "depth3",
+    "depth5",
+    "devotion",
+    "doc-blitz",
+    "doc-overwatch",
+    "doc-phalanx",
+    "doc-resonance",
+    "first-blood",
+    "first-clear",
+    "first-loss",
+    "flawless",
+    "maxed",
+    "swift",
+    "tinkerer"
   ]
 }

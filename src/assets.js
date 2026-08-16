@@ -17,6 +17,7 @@ const state = {
   props: new Map(),
   icons: new Map(),
   ui: new Map(),
+  badges: new Map(),
 };
 
 function loadImage(url) {
@@ -40,7 +41,7 @@ export async function loadAssets() {
 
   const ext = state.manifest.ext ?? 'png';
   const jobs = [];
-  for (const group of ['units', 'props', 'icons', 'ui']) {
+  for (const group of ['units', 'props', 'icons', 'ui', 'badges']) {
     for (const name of state.manifest[group] ?? []) {
       jobs.push(loadImage(`${BASE}/${group}/${name}.${ext}`).then((img) => img && state[group].set(name, img)));
     }
@@ -145,6 +146,17 @@ export function unitSprite(unit) {
 
 export function uiSprite(name) {
   return state.ui.get(name) ?? null;
+}
+
+export function badgeSprite(id) {
+  return state.badges.get(id) ?? null;
+}
+
+// 徽章圖的網址。徽章畫廊是 HTML 面板不是畫布，用 <img> 比較省事，
+// 灰階也能直接交給 CSS filter 做 —— 一份素材兩種狀態，不必生兩套圖。
+export function badgeSrc(id) {
+  const ext = state.manifest?.ext ?? 'webp';
+  return `${BASE}/badges/${id}.${ext}`;
 }
 
 export function propSprite(name) {

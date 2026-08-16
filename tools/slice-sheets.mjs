@@ -45,7 +45,13 @@ const ALL_ITEMS = () => JSON.parse(fs.readFileSync(path.join(ROOT, 'codex', 'dat
 
 // 要切格子的素材表
 function loadSheets() {
-  const dirOf = (id) => (id === 'sheet-terrain' ? 'props' : id === 'sheet-map-icons' ? 'icons' : 'units');
+  // 徽章有自己的目錄：它們不是棋盤上的單位，混進 units 會讓
+  // 「單位素材有沒有全載入」那項檢查跟著徽章數量浮動。
+  const dirOf = (id) => (
+    id === 'sheet-terrain' ? 'props'
+      : id === 'sheet-map-icons' ? 'icons'
+        : id.startsWith('sheet-badges') ? 'badges'
+          : 'units');
   return ALL_ITEMS()
     .filter((it) => it.slice !== false)
     .map((it) => ({
@@ -333,8 +339,8 @@ await browser.close();
 // 產 manifest：載入器只會去要「manifest 上有的檔案」。
 // 不這樣做的話，缺圖會在瀏覽器 console 噴 404，Playwright 測試的
 // noConsoleErrors 斷言就會紅，等於用測試失敗來報告一件本來該優雅降級的事。
-const manifest = { size: OUT_SIZE, ext: EXT, units: [], props: [], icons: [], ui: [] };
-for (const dir of ['units', 'props', 'icons', 'ui']) {
+const manifest = { size: OUT_SIZE, ext: EXT, units: [], props: [], icons: [], ui: [], badges: [] };
+for (const dir of ['units', 'props', 'icons', 'ui', 'badges']) {
   const full = path.join(OUT_ROOT, dir);
   if (!fs.existsSync(full)) continue;
   manifest[dir] = fs.readdirSync(full)

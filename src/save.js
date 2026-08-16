@@ -5,6 +5,7 @@
 // 後面所有的隨機重新來過（同一張地圖但敵人配置全變），那不是存檔，是重生。
 
 import { makeRng, hashSeed } from './rng.js';
+import { DOCTRINE_BY_ID } from './data.js';
 
 const KEY = 'sft_run_v1';
 // v2：加入主動技能（path 綁原型、u.cd 冷卻、u.st 狀態、u.cool 冷卻縮減）。
@@ -28,6 +29,11 @@ export function serializeRun(g) {
     version: VERSION,
     savedAt: Date.now(),
     seed: g.seed,
+    // 威脅等級與準則都必須進存檔。少了它們，讀檔會把一場「威脅 III + 制高」
+    // 的出擊還原成「標準難度 + 沒有準則」—— 敵人變弱、所有準則 hook 靜靜跳過，
+    // 而玩家完全看不出發生了什麼事。
+    depth: g.depth ?? 0,
+    doctrine: g.doctrine ?? null,
     seedLabel: g.seedLabel,
     rngState: g.rng.getState(),
     // map 的 nodes 是純資料，但 floors 裡是同一批物件的參考，
@@ -133,6 +139,11 @@ export function loadRun(meta) {
 
     const g = {
       seed: d.seed,
+      // ⚠️ 存檔是玩家改得動的檔案，所以這兩個值都要夾回合法範圍：
+      // depth 不能超過這個帳號已解鎖的上限，doctrine 必須是真的存在的 id。
+      // 不夾的話，改一行 localStorage 就能拿到威脅 V 的碎片倍率。
+      depth: Math.max(0, Math.min(meta?.depthMax ?? 0, d.depth | 0)),
+      doctrine: DOCTRINE_BY_ID[d.doctrine] ? d.doctrine : null,
       seedLabel: d.seedLabel,
       rng,
       meta,
@@ -153,6 +164,7 @@ export function loadRun(meta) {
         supply: d.pending?.supply ?? null,
         victory: d.pending?.victory ?? null,
         recruit: d.pending?.recruit ?? null,
+        doctrine: d.pending?.doctrine ?? null,
         repair: d.pending?.repair ?? null,
       },
       result: null,

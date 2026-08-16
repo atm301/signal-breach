@@ -2,6 +2,7 @@
 // 所以重繪不會弄丟 handler；靠 signature 比對避免每一幀都重建。
 
 import { CHANGELOG, VERSION } from './changelog.js';
+import { badgeList, BADGE_BY_ID } from './badges.js';
 import {
   TREE, META_UPGRADES, NODE_TYPES, FLOORS, CREDITS, CREDITS_META, ELEMENTS, TUNE, TRAITS, traitV,
   SKILLS, PATH_NAMES, treeNodeInfo,
@@ -13,7 +14,7 @@ import {
 import { upgradeList } from './meta.js';
 import { tutorialProgress } from './tutorial.js';
 import { playSfx } from './audio.js';
-import { nodeIconUrl } from './assets.js';
+import { nodeIconUrl , badgeSrc} from './assets.js';
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -56,6 +57,20 @@ export function createUI(root, actions) {
   root.addEventListener('click', (ev) => {
     const el = ev.target.closest('[data-act]');
     if (!el || el.disabled) return;
+    const [name, ...args] = el.dataset.act.split(':');
+    playSfx(CLICK_SFX[name] || 'click');
+    const fn = actions[name];
+    if (fn) fn(...args);
+  });
+
+  // 7-1：鍵盤操作。<button> 本來就吃 Enter/Space，但準則卡是 <div>
+  // （它是一整張含說明的卡片，不是一顆按鈕），所以要自己補。
+  // 只認 role="button" 的元素，避免把輸入框裡的 Enter 也吃掉。
+  root.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter' && ev.key !== ' ') return;
+    const el = ev.target instanceof Element ? ev.target.closest('[data-act][role="button"]') : null;
+    if (!el) return;
+    ev.preventDefault(); // 空白鍵預設會捲動頁面
     const [name, ...args] = el.dataset.act.split(':');
     playSfx(CLICK_SFX[name] || 'click');
     const fn = actions[name];
@@ -348,6 +363,32 @@ function threatPanel(meta) {
     </section>`;
 }
 
+// 徽章畫廊。
+//
+// 未解鎖的也要顯示（灰階 + 降亮度），因為徽章的用途是**目標清單**：
+// 玩家看到「零傷亡：整局沒有人倒下」才會想「原來可以這樣打」。
+// 只在達成後才冒出來的成就等於沒有成就。
+//
+// 灰階交給 CSS filter，不另外生一套灰階圖：一份素材兩種狀態，
+// 素材改版時不會有一半忘記跟著換。
+function badgePanel(meta) {
+  const list = badgeList(meta);
+  const got = list.filter((b) => b.earned).length;
+  const cells = list.map((b) => `
+    <figure class="badge${b.earned ? ' on' : ''}"
+            title="${esc(b.n)}｜${esc(b.d)}${b.earned ? '' : '（尚未解鎖）'}">
+      <img src="${esc(badgeSrc(b.id))}" alt="${esc(b.n)}${b.earned ? '' : '（尚未解鎖）'}" loading="lazy" width="72" height="72">
+      <figcaption>${esc(b.n)}</figcaption>
+    </figure>`).join('');
+
+  return `
+    <section>
+      <h2>徽章　<span class="tag">${got} / ${list.length}</span></h2>
+      <p class="hint">灰色的還沒解鎖 —— 上面寫的就是下一個目標。</p>
+      <div class="badgegrid">${cells}</div>
+    </section>`;
+}
+
 function hubPanel(g, meta) {
   const tut = tutorialProgress(meta);
   const list = upgradeList(meta).map((u) => {
@@ -385,6 +426,7 @@ function hubPanel(g, meta) {
         ${btn('tutorialReset', '重看一次教學', { disabled: tut.seen === 0 })}
       </div>
     </section>
+    ${badgePanel(meta)}
     <section>
       <h2>戰績</h2>
       <div class="statgrid">
@@ -476,8 +518,20 @@ function battlePanel(g) {
 // 戰術準則選擇。四張並列、代價寫在同一張卡上 ——
 // 把代價藏到選完才說，玩家會覺得被騙；寫在臉上，那才是取捨。
 function doctrinePanel(g) {
+  // 1-1：選準則時把小隊摘要放在最上面。
+  // 沒有它的話這是盲選 —— 準則的價值完全取決於你抽到誰
+  // （例如整隊都是遠程就別選密集陣），但玩家在這一頁看不到自己抽到誰。
+  const squad = g.squad.map((u) => `
+    <div class="dsq">
+      <b>${esc(u.n)}</b>
+      <span>RG ${u.rg}｜AP ${u.map}｜穩定 ${u.stab}</span>
+      <span class="dsq-tr">${traitTags(u)}</span>
+    </div>`).join('');
+
   const cards = DOCTRINES.map((d) => `
-    <div class="item doc" data-act="doctrine:${d.id}">
+    <div class="item doc" data-act="doctrine:${d.id}"
+         role="button" tabindex="0"
+         aria-label="選擇戰術準則 ${esc(d.n)}。${esc(d.d)} F${CAPSTONE_FLOOR} 解鎖：${esc(d.capstone)}">
       <div class="item-head">
         <b>${esc(d.n)}</b>
         <span class="tag">${esc(d.tag)}</span>
@@ -495,6 +549,7 @@ function doctrinePanel(g) {
         這一次出擊只能選一個，之後不能改。<br>
         準則會讓改裝抽卡偏向自己的路線，並解鎖<b>只有這條路拿得到的專屬卡</b>。
       </p>
+      <div class="dsquad">${squad}</div>
       ${cards}
     </section>`;
 }
@@ -638,13 +693,28 @@ function forecastList(g, sel, isPlayer) {
       f.guaranteedKill ? '<b style="color:#a8f5c0">必殺</b>' : f.possibleKill ? '<b style="color:#ffd980">可能擊殺</b>' : '',
     ].filter(Boolean).join(' ');
     const range = f.min === f.max ? `${f.min}` : `${f.min}–${f.max}`;
-    return `<div class="fc-row"><span class="fc-n">${esc(u.n)} ${elTag(u)}</span>`
-      + `<span class="fc-d">${range}</span>`
-      + `<span class="fc-t">HP ${u.hp} ${tags}</span></div>`;
+    // 7-2：這一列的顏色與單字（剋/抗/必殺）對螢幕閱讀器等於不存在，
+    // 所以另外寫一句完整的話。修正明細也一起唸出來 ——
+    // 那是玩家判斷「為什麼是這個數字」的唯一依據。
+    const spoken = [
+      `${u.n}`,
+      `預估傷害 ${f.min === f.max ? f.min : `${f.min} 到 ${f.max}`}`,
+      `目標剩餘 ${u.hp} 點生命`,
+      f.elem > 1 ? '屬性剋制' : f.elem < 1 ? '屬性被抗' : '',
+      f.flankLabel || '',
+      f.cover ? `對方在掩體後，減傷 ${f.cover}` : '',
+      f.guaranteedKill ? '這一擊必定擊破' : f.possibleKill ? '這一擊有機會擊破' : '',
+      ...(f.traitMods ?? []).map((m) => m.n),
+    ].filter(Boolean).join('，');
+    return `<div class="fc-row" role="listitem" aria-label="${esc(spoken)}">`
+      + `<span class="fc-n" aria-hidden="true">${esc(u.n)} ${elTag(u)}</span>`
+      + `<span class="fc-d" aria-hidden="true">${range}</span>`
+      + `<span class="fc-t" aria-hidden="true">HP ${u.hp} ${tags}</span></div>`;
   }).join('');
 
-  return `<div class="forecast${blocked ? ' dim' : ''}">
-      <div class="fc-head">射程內目標${blocked ? '（本回合已出手）' : ''}</div>${rows}
+  return `<div class="forecast${blocked ? ' dim' : ''}" role="list"
+       aria-label="射程內目標傷害預測${blocked ? '，本回合已出手' : ''}">
+      <div class="fc-head" aria-hidden="true">射程內目標${blocked ? '（本回合已出手）' : ''}</div>${rows}
     </div>`;
 }
 
@@ -694,7 +764,11 @@ function draftPanel(g) {
   const source = { levelup: '升級', elite: '精英獎勵', supply: '補給' }[d.source] || '';
   const cards = d.cards.map((c) => `
     <div class="item card-${rarityClass(c.r)}">
-      <div class="item-head"><b>${esc(c.n)}</b><span class="tag">${esc(c.r)}</span></div>
+      <div class="item-head">
+        <b>${esc(c.n)}</b>
+        ${c.doc ? '<span class="tag doconly">準則限定</span>' : ''}
+        <span class="tag">${esc(c.r)}</span>
+      </div>
       <div class="item-body">${esc(c.d)}</div>
       ${btn(`draft:${c.id}`, '選擇')}
     </div>`).join('');
@@ -814,6 +888,13 @@ function resultPanel(g, meta) {
         <div><span>總回合</span><b>${r.turns}</b></div>
         <div><span>取得碎片</span><b>+${r.cores}</b></div>
       </div>
+      ${(r.newBadges?.length ?? 0) > 0 ? `
+        <div class="unlock">✦ 解鎖 ${r.newBadges.length} 枚徽章
+          <div class="newbadges">${r.newBadges.map((id) => {
+    const bd = BADGE_BY_ID[id];
+    return bd ? `<figure><img src="${esc(badgeSrc(id))}" alt="${esc(bd.n)}" width="64" height="64"><figcaption>${esc(bd.n)}</figcaption></figure>` : '';
+  }).join('')}</div>
+        </div>` : ''}
       <p class="hint">種子 <b>${esc(r.seedLabel)}</b>（原始值 ${esc(r.seed)}）。目前碎片存量 ${meta.cores}。</p>
       <div class="row2">
         ${btn('toHub', '返回基地')}
@@ -839,7 +920,7 @@ function squadPanel(g) {
         </div>
         <div class="item-body">
           ${pos}HP ${u.hp}/${u.mhp} ｜ AP ${u.ap}/${u.map} ${fired}<br>
-          ATK ${u.atk} ｜ RG ${u.rg} ｜ SP ${u.sp}<br>
+          ATK ${u.atk} ｜ RG ${rangeOf(g, u)}${rangeOf(g, u) > u.rg ? '<span class="up">↑</span>' : ''} ｜ SP ${u.sp}<br>
           ${elTag(u)} ｜ 穩定 ${u.stab ?? 60}（傷害浮動 ±${spreadPct(u)}%）<br>
           XP ${u.xp}/${xpToNext(u.lv)}
           <div class="traits">${traitTags(u)}</div>

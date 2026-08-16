@@ -277,6 +277,10 @@ export function confirmRecruit(g) {
 // 選定這一局的準則。整局只能選一次，之後不能改 ——
 // 可以改的話它就不是承諾，只是一個隨時能切的加成面板。
 export function chooseDoctrine(g, id) {
+  // 兩道門都要：pending 管「現在是不是選的時候」，g.doctrine 管「是不是已經選過」。
+  // 只看 pending 的話，任何把 pending 重新塞回去的路徑（讀檔、外掛、
+  // 之後某個手滑的重試邏輯）都能再選一次 —— 而代價（HP、射程）會再結算一遍。
+  if (g.doctrine) return { ok: false, reason: '這一次出擊已經選過準則了' };
   if (!g.pending.doctrine) return { ok: false, reason: '目前不在選準則階段' };
   const doc = DOCTRINE_BY_ID[id];
   if (!doc) return { ok: false, reason: '沒有這個準則' };
@@ -336,7 +340,16 @@ export function enterNode(g, nodeId) {
   const node = g.map.nodes[nodeId];
   g.currentNodeId = nodeId;
   node.visited = true;
+  const beforeDepth = g.stats.depth;
   g.stats.depth = Math.max(g.stats.depth, node.floor);
+  // 1-3：準則第二段能力解鎖要講出來。
+  // 不講的話它就是一個沉默生效的加成 —— 玩家整局都不會發現，
+  // 那等於這段內容不存在。
+  if (g.doctrine && beforeDepth < CAPSTONE_FLOOR && g.stats.depth >= CAPSTONE_FLOOR) {
+    const doc = doctrineOf(g);
+    log(g, `準則解鎖：${doc.n} —— ${doc.capstone}`, true);
+    sfx(g, 'level', 700);
+  }
 
   switch (node.type) {
     case 'battle':
@@ -597,6 +610,88 @@ export function rangeOf(g, u) {
 //
 // 新增詞條時：修正一律走這裡，而且一定要 push 進 traitMods。
 // 沒 push 的話玩家看得到數字變了卻不知道為什麼，那比沒有這個詞條還糟。
+// ─────────────────────────────────────────────────────────────
+// 準則掛在哪裡（改準則效果前先看這張表，不然一定會漏）
+//
+//   閃擊 blitz
+//     doctrineMods()   處決程序、狂熱疊層
+//     onEnemyKilled()  擊破後全隊 +1 AP（capstone 變 2）
+//     startBattle()    狂熱層數歸零
+//   密集陣 phalanx
+//     doctrineMods()   相鄰/落單的攻擊修正、接力指令、密集陣掩護減傷
+//     attackUnit()     lastHitId / lastHitBy（接力要用）
+//   制高 overwatch
+//     chooseDoctrine() 全隊 Range +1
+//     doctrineMods()   遠距加成、貼身懲罰
+//     rangeOf()        狙擊位：站掩體再 +1
+//     damageBreakdown() 壓制射擊：距離 3+ 鎖住下緣浮動
+//   解析 resonance
+//     doctrineMods()   相剋加成、失諧懲罰
+//     startBattle()    頻譜校準：開場換屬性
+//     attackUnit()     連鎖共振濺射
+//
+// 共用：cardPoolFor() 依 bias 調權重並放行專屬卡；capstoneOn() 管第二段。
+// ─────────────────────────────────────────────────────────────
+
+// 準則對這一擊的修正。
+//
+// 抽成獨立函式的理由：damageBreakdown 已經接近 200 行，而「詞條 / 卡片 / 準則」
+// 是三組互不相干的規則，只是剛好都乘在同一個數字上。
+// 混在一起的話，之後加第四組規則時沒有人找得到該加在哪。
+//
+// ⚠️ 回傳倍率而不是就地改外層變數：純函式才驗得動。
+// mods 會被推進 traitMods，也就是會出現在出手前的傷害預測卡上。
+function doctrineMods(g, attacker, target, ctx) {
+  const { d, elem, mods } = ctx;
+  const doc = doctrineOf(g);
+  const cap = capstoneOn(g);
+  let mult = 1;
+  let flat = 0;
+  if (!doc) return { mult, flat, doc, cap };
+
+  const mul = (label, m) => { mult *= m; mods.push({ n: label, m, good: 1 }); };
+
+  if (attacker.tm === 'p') {
+    if (doc.id === 'blitz') {
+      const line = cap ? doc.execHpCap : doc.execHp;
+      if (hasMod(attacker, 'execute') && target.hp <= target.mhp * line) mul('處決程序', 1.4);
+      if (hasMod(attacker, 'frenzy') && (attacker.frenzy ?? 0) > 0) {
+        mul(`狂熱 x${attacker.frenzy}`, 1 + 0.08 * attacker.frenzy);
+      }
+    }
+    if (doc.id === 'phalanx') {
+      if (alliesAround(g, attacker) > 0) mul('密集陣', 1 + doc.adjAtk);
+      else mul('落單', 1 + doc.aloneAtk);
+      if (hasMod(attacker, 'relay') && g.battle?.lastHitId === target.id
+          && g.battle?.lastHitBy !== attacker.id) {
+        mul('接力指令', 1.25);
+      }
+    }
+    if (doc.id === 'overwatch') {
+      if (d >= 2) mul('制高', 1 + doc.farAtk);
+      // 貼身懲罰只罰「本來可以站遠卻選擇貼上去」的單位。射程 1 的近戰
+      // 沒有第二個選項，罰它等於把準則變成「你的先鋒這局作廢」。
+      else if (u_canRange(attacker)) mul('貼身', 1 + doc.nearAtk);
+    }
+    if (doc.id === 'resonance') {
+      if (elem > 1) mul('解析', doc.elemUp);
+      else if (elem < 1) mul('失諧', 1 + doc.elemDown);
+    }
+  }
+
+  // 密集陣的減傷掛在防守方身上，所以條件看的是 target 不是 attacker
+  if (doc.id === 'phalanx' && target.tm === 'p') {
+    const near = alliesAround(g, target);
+    if (near > 0) {
+      flat += doc.adjDef;
+      if (hasMod(target, 'bulwark')) flat += near;
+      if (cap && near >= 2) flat += 2;
+      mods.push({ n: '密集陣掩護', m: -flat, good: 1 });
+    }
+  }
+  return { mult, flat, doc, cap };
+}
+
 export function damageBreakdown(g, attacker, target, skillMult = 1) {
   const d = dist(attacker.x, attacker.y, target.x, target.y);
   const bonusMelee = d === 1 && attacker.pass.includes(PASS.A3) ? 1 : 0;
@@ -675,47 +770,13 @@ export function damageBreakdown(g, attacker, target, skillMult = 1) {
     if (guarded) traitMods.push({ n: '協防裝置', m: -2, good: 1 });
   }
   // ── 戰術準則 ────────────────────────────────────────────
-  // 全部走 mul2()，所以每一條都會出現在出手前的傷害預測卡上。
-  const doc = doctrineOf(g);
-  const cap = capstoneOn(g);
-  if (doc && attacker.tm === 'p') {
-    if (doc.id === 'blitz') {
-      const line = cap ? doc.execHpCap : doc.execHp;
-      if (hasMod(attacker, 'execute') && target.hp <= target.mhp * line) mul2('處決程序', 1.4);
-      if (hasMod(attacker, 'frenzy') && (attacker.frenzy ?? 0) > 0) {
-        mul2(`狂熱 x${attacker.frenzy}`, 1 + 0.08 * attacker.frenzy);
-      }
-    }
-    if (doc.id === 'phalanx') {
-      if (alliesAround(g, attacker) > 0) mul2('密集陣', 1 + doc.adjAtk);
-      else mul2('落單', 1 + doc.aloneAtk);
-      if (hasMod(attacker, 'relay') && g.battle?.lastHitId === target.id
-          && g.battle?.lastHitBy !== attacker.id) {
-        mul2('接力指令', 1.25);
-      }
-    }
-    if (doc.id === 'overwatch') {
-      if (d >= 2) mul2('制高', 1 + doc.farAtk);
-      // 貼身懲罰只罰「本來可以站遠卻選擇貼上去」的單位。射程 1 的近戰
-      // 沒有第二個選項，罰它等於把準則變成「你的先鋒這局作廢」。
-      else if (u_canRange(attacker)) mul2('貼身', 1 + doc.nearAtk);
-    }
-    if (doc.id === 'resonance') {
-      if (elem > 1) mul2('解析', doc.elemUp);
-      else if (elem < 1) mul2('失諧', 1 + doc.elemDown);
-    }
-  }
-  // 密集陣的減傷掛在防守方身上，所以條件看的是 target 不是 attacker
-  let docFlat = 0;
-  if (doc?.id === 'phalanx' && target.tm === 'p') {
-    const near = alliesAround(g, target);
-    if (near > 0) {
-      docFlat += doc.adjDef;
-      if (hasMod(target, 'bulwark')) docFlat += near;
-      if (cap && near >= 2) docFlat += 2;
-      traitMods.push({ n: '密集陣掩護', m: -docFlat, good: 1 });
-    }
-  }
+  // 詳見 doctrineMods()：三組規則（詞條 / 卡片 / 準則）分開算，
+  // 只是剛好都乘在同一個數字上。
+  const dm = doctrineMods(g, attacker, target, { d, elem, mods: traitMods });
+  const doc = dm.doc;
+  const cap = dm.cap;
+  const docFlat = dm.flat;
+  traitMult *= dm.mult;
 
   // 蓄能：整個回合沒出手，下一刀更重
   if (hasMod(attacker, 'momentum') && attacker.charged) mul2('蓄能', 1.6);
@@ -1942,6 +2003,10 @@ export function finishRun(g, won) {
     turns: g.stats.turns,
     seedLabel: g.seedLabel,
     seed: g.seed,
+    // 徽章條件要用的：倒地次數、抽卡數、結束時的等級分佈
+    downed: g.stats.downed ?? 0,
+    drafts: g.stats.drafts ?? 0,
+    levels: g.squad.map((u) => u.lv),
   };
   g.battle = null;
   // run 已經結束，任何還開著的抽卡／事件／商店面板都要收掉，

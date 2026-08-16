@@ -1,6 +1,7 @@
 // 跨 run 的永久進度。唯一會碰 localStorage 的檔案，storage 可注入方便測試。
 
 import { META_UPGRADES, META_BY_ID, MAX_DEPTH } from './data.js';
+import { newlyEarned } from './badges.js';
 
 const STORAGE_KEY = 'sft_meta_v1';
 
@@ -9,7 +10,13 @@ export function emptyMeta() {
     version: 1,
     cores: 0,
     upgrades: {},
-    stats: { runs: 0, wins: 0, bestDepth: 0, totalKills: 0, totalCores: 0 },
+    stats: { runs: 0, wins: 0, bestDepth: 0, totalKills: 0, totalCores: 0, totalDrafts: 0 },
+    // 已解鎖的徽章：{ id: ISO 時間 }。存時間而不是 true，
+    // 之後想做「最近解鎖」都不必再改存檔格式。
+    badges: {},
+    // 每條準則各通關幾次。全準則資格與專精認證都要它，
+    // 而且它比「掃一遍 badges」可靠 —— 徽章可以被補發，計數不會。
+    doctrineWins: {},
     // 已解鎖到第幾級威脅（通關才會 +1）與「現在要打第幾級」。
     // 這兩個一定要分開存：合成一個的話，玩家挑回低威脅練功就等於把解鎖進度洗掉。
     depthMax: 0,
@@ -43,6 +50,8 @@ export function loadMeta(storage) {
       ...parsed,
       upgrades: { ...base.upgrades, ...(parsed.upgrades || {}) },
       stats: { ...base.stats, ...(parsed.stats || {}) },
+      badges: { ...(parsed.badges || {}) },
+      doctrineWins: { ...(parsed.doctrineWins || {}) },
       depthMax: Math.max(0, Math.min(MAX_DEPTH, parsed.depthMax ?? 0)),
       depth: Math.max(0, Math.min(MAX_DEPTH, parsed.depth ?? 0)),
       // 舊存檔沒有 tutorial 欄位時留成 undefined，讓 tutorialOf() 依 runs 決定 ——
@@ -98,6 +107,19 @@ export function recordRun(meta, result) {
   meta.stats.bestDepth = Math.max(meta.stats.bestDepth, result.depth);
   meta.stats.totalKills += result.kills;
   meta.stats.totalCores += result.cores;
+  meta.stats.totalDrafts = (meta.stats.totalDrafts ?? 0) + (result.drafts ?? 0);
+  if (result.won && result.doctrine) {
+    meta.doctrineWins = meta.doctrineWins ?? {};
+    meta.doctrineWins[result.doctrine] = (meta.doctrineWins[result.doctrine] ?? 0) + 1;
+  }
+
+  // 徽章要在上面所有累計都寫完之後才算 —— 「百次擊破」看的是
+  // 含這一局在內的總擊破，先算的話會少一局，玩家會覺得徽章壞掉。
+  meta.badges = meta.badges ?? {};
+  const fresh = newlyEarned(meta, result);
+  const now = new Date().toISOString();
+  for (const id of fresh) meta.badges[id] = now;
+  result.newBadges = fresh;
   // 只有真的通關才解鎖下一級。打到一半陣亡不算 —— 不然「進去送死」就是解鎖捷徑。
   if (result.won) {
     const lv = result.depthLv ?? 0;
