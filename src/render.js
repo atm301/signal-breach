@@ -967,7 +967,12 @@ export function renderIdle(ctx, g, size, title, mood = 'hub') {
 // 有了它，每一步都是在回答「我要不要用這一格換那一刀」。
 function drawIntents(ctx, g, cell, time, intents) {
   if (!intents?.length || g.battle?.phase !== 'player') return;
-  const pulse = 0.6 + Math.sin(time / 380) * 0.4;
+  // 只有「這一擊會打死人」才閃。
+  //
+  // 原本移動框與攻擊線都跟著呼吸，結果是整個棋盤一直在動 ——
+  // 而畫面上會動的東西會一直搶注意力，代表玩家沒辦法用「有東西在閃」
+  // 判斷任何事情。閃爍要留給唯一真正緊急的狀況，其餘一律靜態顯示。
+  const alarm = 0.72 + Math.sin(time / 300) * 0.28;
 
   for (const it of intents) {
     const u = unitById(g, it.unitId);
@@ -978,7 +983,7 @@ function drawIntents(ctx, g, cell, time, intents) {
     if (it.move) {
       const to = { x: PAD + it.move.x * cell + cell * 0.5, y: PAD + it.move.y * cell + cell * 0.5 };
       ctx.save();
-      ctx.strokeStyle = `rgba(255,180,120,${0.30 + pulse * 0.2})`;
+      ctx.strokeStyle = 'rgba(255,180,120,.46)'; // 靜態：走位只是資訊，不是警報
       ctx.lineWidth = 2;
       ctx.setLineDash([5, 5]);
       ctx.beginPath();
@@ -998,7 +1003,8 @@ function drawIntents(ctx, g, cell, time, intents) {
 
     // 會被打死的話整條線變紅加粗 —— 那是玩家最需要一眼看到的事
     ctx.save();
-    ctx.strokeStyle = it.kills ? `rgba(255,70,90,${0.7 + pulse * 0.3})` : `rgba(255,150,115,${0.5 + pulse * 0.3})`;
+    // 致命線會閃，非致命線靜止。這樣「有東西在閃」就等於「有人要死了」。
+    ctx.strokeStyle = it.kills ? `rgba(255,70,90,${alarm})` : 'rgba(255,150,115,.72)';
     ctx.lineWidth = it.kills ? 4 : 2.5;
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
